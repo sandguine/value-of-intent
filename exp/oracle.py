@@ -158,7 +158,7 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
 
-def get_rollout(train_state, config):
+def get_rollout(train_state, config, save_dir=None):
     """Generate a single episode rollout for visualization.
     
     Runs a single episode in the environment using the current policy networks to generate
@@ -1400,7 +1400,7 @@ def main(config):
         tags=["IPPO", "FF", "SplitNetwork", "Oracle"],
         config=config,
         mode=config["WANDB_MODE"],
-        name=f'oracle_ff_ippo_overcooked_{layout_name}'
+        name=f'oracle_ff_ippo_overcooked_{config["ENV_KWARGS"]["layout"]}'
     )
 
     print("\nVerifying config before rollout:")
@@ -1413,16 +1413,19 @@ def main(config):
         raise ValueError("DIMS not found in config - check dimension initialization")
 
     # Create a new directory for the results
+    # Process layout configuration
+    config["ENV_KWARGS"]["layout"] = overcooked_layouts[layout_name]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
+    model_dir_name = create_safe_filename("oracle_ff_ippo_oc", config, timestamp)
     save_dir = os.path.join(
         "saved_models", 
         date,
-        f"{layout_name}", 
-        f"oracle_ff_ippo_overcooked_{layout_name}_{timestamp}_{config['SEED']}"
+        layout_name, 
+        f"{model_dir_name}_{config['SEED']}"
     )
     os.makedirs(save_dir, exist_ok=True)
-
+    
 
     # Setup random seeds and training
     rng = jax.random.PRNGKey(config["SEED"])
@@ -1431,23 +1434,18 @@ def main(config):
     out = jax.vmap(train_jit)(rngs)
 
     # Save parameters and results
-    save_training_results(save_dir, out, config, prefix="oracle_ff_ippo_overcooked_")
-
-    metrics_dict = {key: np.array(value) for key, value in out["metrics"].items()}
-
-    metrics_path = os.path.join(save_dir, "metrics.npz")
-    np.savez(metrics_path, **metrics_dict)
-
-    # Save the configuration
-    config_path = os.path.join(save_dir, "config.pkl")
-    with open(config_path, 'wb') as f:
+    save_training_results(save_dir, out, config, prefix="oracle_ff_ippo_oc_")
+    np.savez(os.path.join(save_dir, "metrics.npz"), 
+             **{key: np.array(value) for key, value in out["metrics"].items()})
+    
+    with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
         pickle.dump(config, f)
 
     print(f"Training results saved to: {save_dir}")
 
     # Generate and save visualization
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-    viz_base_name = create_safe_filename("oracle_ff_ippo_overcooked", config, timestamp)
+    viz_base_name = create_safe_filename("oracle_ff_ippo_oc", config, timestamp)
     viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
     create_visualization(train_state, config, viz_filename, save_dir)
     
@@ -1465,7 +1463,7 @@ def main(config):
     print("First few values of reward_mean:", reward_mean[:5])
     print("Check for NaN:", np.isnan(reward_mean).any())
     print("Range of values:", np.min(reward_mean), np.max(reward_mean))
-    reward_std = rewards.std(0) / np.sqrt(config["NUM_SEEDS"])  # standard error
+    reward_std = rewards.std(0) / np.sqrt(config["NUM_SEEDS"])
     
     plt.figure()
     plt.plot(reward_mean)
@@ -1476,8 +1474,8 @@ def main(config):
     plt.xlabel("Update Step")
     plt.ylabel("Return")
     
-    filename = f'{config["ENV_NAME"]}_cramped_room_new'
-    plt.savefig(os.path.join(save_dir, f'{filename}.png'))
+    learning_curve_name = create_safe_filename(f"{config['ENV_NAME']}_learning_curve", config, timestamp)
+    plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))
     plt.close()
 
 if __name__ == "__main__":

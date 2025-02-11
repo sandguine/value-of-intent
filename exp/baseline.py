@@ -153,6 +153,7 @@ class Transition(NamedTuple):
     reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
+    
 def get_rollout(train_state, config, save_dir=None):
     """Generate a single episode rollout for visualization"""
     # Initialize environment
@@ -863,6 +864,7 @@ def main(hydra_config):
     rngs = jax.random.split(rng, config["NUM_SEEDS"])    
     train_jit = jax.jit(make_train(config))
     out = jax.vmap(train_jit)(rngs)
+    # pickle.dump(out["runner_state"].params, open(os.path.join(save_dir, "out.pkl"), "wb"))
     
     # Save results and generate visualizations
     save_training_results(save_dir, out, config, prefix="bl_ff_ippo_oc_")

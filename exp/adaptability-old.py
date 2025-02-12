@@ -584,6 +584,7 @@ def make_train(config):
 
     # Load pretrained parameters once at this level
     pretrained_params = load_training_results(config["LOAD_PATH"], load_type="params", config=config)
+    print("shape of pretrained_params:", jax.tree_util.tree_map(lambda x: x.shape, pretrained_params))
 
     # Calculate key training parameters
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]

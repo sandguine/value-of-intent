@@ -477,12 +477,19 @@ def load_training_results(load_dir, load_type="params", config=None):
 
             # Convert parameters to JAX-compatible format
             all_params = jax.tree_util.tree_map(jnp.array, all_params)
-            
-            num_seeds = len(all_params)
-            seed_idx = jax.random.randint(subkey, shape=(), minval=0, maxval=num_seeds)
-            sampled_params = jax.tree_util.tree_map(lambda x: x[seed_idx], all_params)
-            sampled_params = flax.core.freeze(sampled_params)
-
+            all_params = flax.core.freeze(all_params)
+            num_seeds = next(iter(all_params["params"]["actor_dense1"]["bias"].shape))
+            sampled_indices = jax.random.choice(subkey, num_seeds, shape=(16,), replace=False)
+            # Extract 16 sampled parameter sets
+            sampled_params = jax.tree_util.tree_map(lambda x: x[sampled_indices], all_params)
+            print("shape of sampled_params:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params))
+            # Reshape for easier access if needed
+            # sampled_params_reshaped = jax.tree_util.tree_map(lambda x: x.squeeze(axis=1), sampled_params)
+            # print("shape of sampled_params_reshaped:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params_reshaped))
+            # seed_idx = jax.random.randint(subkey, shape=(), minval=0, maxval=num_seeds)
+            # sampled_params = jax.tree_util.tree_map(lambda x: x[seed_idx], all_params)
+            # print("shape ofsampled_params before freeze:", sampled_params.shape)
+            # sampled_params = flax.core.freeze(sampled_params)
             # print(sampled_params)
 
             print("Successfully loaded pretrained model.")

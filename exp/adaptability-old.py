@@ -450,6 +450,62 @@ def save_training_results(save_dir, out, config, prefix=""):
     else:
         print("Warning: No seed-specific parameters were successfully processed")
 
+def load_training_results(load_dir, load_type="params", config=None):
+    """
+    Load training results from pickle format
+    
+    Args:
+        load_dir: Directory containing saved files
+        prefix: Prefix used in filenames
+        load_type: Either "params" or "complete" to load just params or complete output
+    Returns:
+        Loaded data converted to JAX arrays where appropriate
+    """
+    key = jax.random.PRNGKey(0) 
+    key, subkey = jax.random.split(key)
+
+    if load_type == "params":
+        pickle_path = os.path.join(load_dir, f"params.pkl")
+        if os.path.exists(pickle_path):
+            print("Loading params from pickle format...")
+            with open(pickle_path, 'rb') as f:
+                all_params = pickle.load(f)
+
+            # Ensure correct structure
+            if not isinstance(all_params, dict) or "params" not in all_params:
+                raise ValueError(f"Invalid parameter structure in {pickle_path}. Expected a dict with 'params' key.")
+
+            # Convert parameters to JAX-compatible format
+            all_params = jax.tree_util.tree_map(jnp.array, all_params)
+            
+            num_seeds = len(all_params)
+            seed_idx = jax.random.randint(subkey, shape=(), minval=0, maxval=num_seeds)
+            sampled_params = jax.tree_util.tree_map(lambda x: x[seed_idx], all_params)
+            sampled_params = flax.core.freeze(sampled_params)
+
+            # print(sampled_params)
+
+            print("Successfully loaded pretrained model.")
+            print("Loaded params type:", type(sampled_params))  # Should be <FrozenDict>
+            print("Keys in params:", sampled_params.keys())
+            # print("Shape of sampled_params:", jax.tree_map(lambda x: x.shape, sampled_params))
+            
+            return sampled_params
+                
+    elif load_type == "complete":
+        pickle_path = os.path.join(load_dir, f"complete_out.pkl")
+        if os.path.exists(pickle_path):
+            print("Loading complete output from pickle format...")
+            with open(pickle_path, 'rb') as f:
+                out = pickle.load(f)
+                # Convert numpy arrays to JAX arrays
+                return jax.tree_util.tree_map(
+                    lambda x: jax.numpy.array(x) if isinstance(x, np.ndarray) else x,
+                    out
+                )
+    
+    raise FileNotFoundError(f"No saved {load_type} found in {load_dir}")
+
 # def load_pretrained_params(path, is_complete=False):
 #     """
 #     Simple function to load pretrained parameters from a file.
@@ -507,44 +563,31 @@ def save_training_results(save_dir, out, config, prefix=""):
 
 #     return fixed_train_state
 
-def prepare_training_params(config):
-    """Loads and prepares pre-trained parameters for JAX training."""
-    load_path = os.path.join(config["LOAD_PATH"], "params.pkl")
+# Close to correct
+# def prepare_training_params(config):
+#     """Loads and prepares pre-trained parameters for JAX training."""
+#     load_path = os.path.join(config["LOAD_PATH"], "params.pkl")
 
-    # Load parameters
-    with open(load_path, 'rb') as f:
-        all_params = pickle.load(f)
+#     # Load parameters
+#     with open(load_path, 'rb') as f:
+#         all_params = pickle.load(f)
 
-    # If multiple seeds exist, sample `NUM_ENVS` parameter sets
-    if isinstance(all_params, dict) and len(all_params) == 100:
-        print(f"Sampling {config['NUM_ENVS']} parameter sets from 100 available seeds.")
-        sampled_seeds = random.sample(list(all_params.keys()), config["NUM_ENVS"])
+#     # If multiple seeds exist, sample `NUM_ENVS` parameter sets
+#     if isinstance(all_params, dict) and len(all_params) > 1:
+#         print(f"Sampling {config['NUM_ENVS']} parameter sets from 100 available seeds.")
+#         sampled_seeds = random.sample(list(all_params.keys()), config["NUM_ENVS"])
 
-        # Stack parameters across `NUM_ENVS`
-        params = {k: jnp.stack([all_params[seed][k] for seed in sampled_seeds], axis=0)
-                  for k in all_params[sampled_seeds[0]]}
-    else:
-        print("Warning: No multiple seeds detected, using saved parameters as-is.")
-        params = all_params
+#         # Stack parameters across `NUM_ENVS`
+#         params = {k: jnp.stack([all_params[seed][k] for seed in sampled_seeds], axis=0)
+#                   for k in all_params[sampled_seeds[0]]}
+#     else:
+#         print("Warning: No multiple seeds detected, using saved parameters as-is.")
+#         params = all_params
 
-    # Convert parameters to JAX-compatible format
-    params = jax.tree_util.tree_map(jnp.array, params)
+#     # Convert parameters to JAX-compatible format
+#     params = jax.tree_util.tree_map(jnp.array, params)
 
-    # Initialize TrainState
-    tx = optax.chain(
-        optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
-        optax.adam(config["LR"], eps=1e-5)
-    )
-
-    return TrainState.create(
-        apply_fn=ActorCritic(
-            action_dim=config["DIMS"]["action_dim"],
-            activation=config["ACTIVATION"]
-        ).apply,
-        params=flax.core.freeze(params),  # Ensure immutability
-        tx=tx
-    )
-
+#     return params
 
 # def prepare_training_params(config):
 #     load_path = os.path.join(config["LOAD_PATH"], "params.pkl")
@@ -724,7 +767,7 @@ def make_train(config):
     assert env.action_space().n == dims["action_dim"], "Action dimension mismatch"
 
     # Load pretrained parameters once at this level
-    pretrained_params = prepare_training_params(config)
+    pretrained_params = load_training_results(config["LOAD_PATH"], load_type="params", config=config)
 
     # Calculate key training parameters
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
@@ -893,6 +936,7 @@ def make_train(config):
 
                 # Separate observations by environment
                 batch_size = last_obs['agent_0'].shape[0]  # Should equal NUM_ENVS
+                print(f"batch_size: {batch_size}")
                 
                 # Process each environment with its fixed partner
                 def process_single_env(env_idx, obs_and_rng):
@@ -900,11 +944,12 @@ def make_train(config):
 
                     # Process partner agent (Baseline, fixed)
                     partner_obs = obs['agent_1']
+                    print("partner_obs.shape BEFORE vmap:", partner_obs.shape)
                     partner_obs = partner_obs.transpose(1, 0, 2).reshape(-1, 520)  # Ensure correct batching
                     print("partner_obs.shape BEFORE vmap:", partner_obs.shape)  # Should be (NUM_ENVS, 520)
 
                     pi_partner, _ = jax.vmap(network.apply, in_axes=(None, 0))(
-                        pretrained_params.params, 
+                        pretrained_params, 
                         partner_obs
                     )
                     print("pi_partner.shape AFTER vmap:", pi_partner.batch_shape)  # Should be (NUM_ENVS,)

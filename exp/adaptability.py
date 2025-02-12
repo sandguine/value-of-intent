@@ -1,23 +1,10 @@
 """
-[1] Only need to load the parameters from pre-trained of the partner agent.
-[0] Everytime network.apply is being called is when we need to passed along either trainstate.params or pretrained parameters from fixed partners.
-    [1] Basically, just used the load_training_results for network.apply agent_1 to load and sample properly, sample equal to numbers of NUM_ENVS.
-    [0] Pretty sure that in get_rollout, the while not done is to apply to each seed multiple times so we could just used from sampled. <- Double check this
-[1] Network initialization need to be done only for agent_0.
-[1] Update advantages, train states etc. only on self.
-    [1] As for fixed just keep using the fix params no updates.
-    [0] Double check the size of dictionary. We can use agent_0 data directly or wrapped under dict if dimension mismatched.
-[1] There shouldn't be much changed at all to this version except for loading the save params from pre-trained.
-[1] Need to get the save and visualization functions correctly from baseline.
-[0] Need to plot to wandb correctly, either each seed individually or find the right aggregating methods for all seeds.
-    [0] Honestly, perhaps look individually since this might be relevant to policy coming from different SECs
-        [0] This could also reveal characteristics of the partner policy or self that make it s.t. total reward is higher.
-        [0] This might reveal info behaviorally that may have been previously neglected.
-[0] Maybe look and compare to the oracle_shared as well on the batchify and unbatchify.
-[0] Double check in the all dictionary elements that we can use agent_0 directly 
-    [0] i.e. train_state can be directly equal to train_state_agent_0
-    [0] auxilary lost, don't need combined_aux and agent_0 aux is enough
+Implementation of Independent PPO (IPPO) for multi-agent environments.
+Based on PureJaxRL's PPO implementation but adapted for multi-agent scenarios.
 
+This version is for the overcooked environment with oracle knowledge of the other agent's action.
+What this means is that the principal agent has access to the other agent's action at each timestep,
+simulating full policy access of another agent one step at a time.
 """
 
 # Core imports for JAX machine learning
@@ -51,12 +38,14 @@ import pickle
 from datetime import datetime
 from pathlib import Path
 import sys
-import random
+
 # Plotting imports
 import matplotlib.pyplot as plt
 
 # Helper imports
 from functools import partial
+import random
+import flax
 
 class ActorCritic(nn.Module):
     """Neural network architecture implementing both policy (actor) and value function (critic)
@@ -219,26 +208,11 @@ def get_rollout(train_state, config, save_dir=None):
     key_a_agent_0, key_a_agent_1 = jax.random.split(key_a)
     # key_r for environment reset
     # key for future episode steps
-
-    # Process agent_1 first using pretrained parameters
-    agent_1_obs = obs["agent_1"].flatten()
-    pi_1, _ = network.apply(agent_1_params, agent_1_obs)
-    action_1 = pi_1.sample(seed=key_a1)
     
-    # Process agent_0 with augmented observation
-    agent_0_obs = obs["agent_0"].flatten()
-    one_hot_action = jax.nn.one_hot(action_1, env.action_space().n)
-    agent_0_obs_augmented = jnp.concatenate([agent_0_obs, one_hot_action])
-    pi_0, _ = network.apply(train_state.params, agent_0_obs_augmented)
-    action_0 = pi_0.sample(seed=key_a0)
-    # # Initialize networks with correct dimensions from config
-    # init_x_agent_0 = jnp.zeros(dims["augmented_obs_dim"])  # Agent 0 gets augmented obs
-    # # init_x_agent_1 = jnp.zeros(dims["base_obs_dim"])       # Agent 1 gets base obs
+    # Initialize networks with correct dimensions from config
+    init_x_agent_0 = jnp.zeros(dims["augmented_obs_dim"])  # Agent 0 gets augmented obs
     
-    # network_params_agent_0 = train_state['agent_0'].params
-    # network_params_agent_1 = train_state['agent_1'].params
-    # # do i actually need this? seed_params = loaded_params['seed_0']['params']  # Choose which seed's parameters to use -> need to sample params from all seeds with random or something
-    # # network_params_agent_1 = train_state['agent_1'].params -> might need to look and compared to the oracle shared a bit?
+    network_params_agent_0 = train_state['agent_0'].params
 
     done = False
 
@@ -249,38 +223,28 @@ def get_rollout(train_state, config, save_dir=None):
     shaped_rewards = []
 
     # Run episode until completion
-
     while not done:
         key, key_a0, key_a1, key_s = jax.random.split(key, 4)
 
-        # Process observations
+        # First process agent_1 (uses base observation)
         agent_1_obs = obs["agent_1"].flatten()
+        pi_1, _ = network.apply(network_params_agent_1, agent_1_obs)
+        action_1 = pi_1.sample(seed=key_a1)
+
+        # Then process agent_0 with augmented observation
         agent_0_obs = obs["agent_0"].flatten()
-
-        if is_shared_params:
-            # Baseline case - use same parameters for both agents
-            pi_1, _ = network.apply(network_params, agent_1_obs)
-            pi_0, _ = network.apply(network_params, agent_0_obs)
-        else:
-            # Oracle case - use separate parameters for each agent
-            pi_1, _ = network.apply(network_params_agent_1, agent_1_obs)
-            action_1 = pi_1.sample(seed=key_a1)
-            
-            # For agent_0, augment observation with agent_1's action
-            one_hot_action = jax.nn.one_hot(action_1, env.action_space().n)
-            agent_0_obs_augmented = jnp.concatenate([agent_0_obs, one_hot_action])
-            pi_0, _ = network.apply(network_params_agent_0, agent_0_obs_augmented)
-            
-            # Verify dimensions
-            assert agent_0_obs_augmented.shape[-1] == dims["augmented_obs_dim"], \
-                f"Agent 0 augmented obs mismatch: expected {dims['augmented_obs_dim']}, got {agent_0_obs_augmented.shape[-1]}"
+        # Create one-hot encoding of agent_1's action
+        one_hot_action = jax.nn.one_hot(action_1, dims["action_dim"])
+        # Concatenate base observation with action encoding
+        agent_0_obs_augmented = jnp.concatenate([agent_0_obs, one_hot_action])
         
-        # Sample actions
+        # Verify dimensions
+        assert agent_0_obs_augmented.shape[-1] == dims["augmented_obs_dim"], \
+            f"Agent 0 augmented obs mismatch: expected {dims['augmented_obs_dim']}, got {agent_0_obs_augmented.shape[-1]}"
+        
+        pi_0, _ = network.apply(network_params_agent_0, agent_0_obs_augmented)
         action_0 = pi_0.sample(seed=key_a0)
-        if is_shared_params:
-            action_1 = pi_1.sample(seed=key_a1)
 
-        # Package actions and step env
         actions = {
             "agent_0": action_0,
             "agent_1": action_1
@@ -313,32 +277,42 @@ def get_rollout(train_state, config, save_dir=None):
 
     return state_seq
 
-def batchify(x: dict, agent_list, num_actors):
-    """Converts individual agent observations into a batched tensor."""
-    x = jnp.stack([x[a] for a in agent_list])
-    return x.reshape((num_actors, -1))
-
-def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
-    """
-    Splits a batched tensor of observations into individual agent observations.
-
-    Args:
-        x (jnp.ndarray): A batched tensor of shape `(num_actors, num_envs, -1)`.
-        agent_list (list): List of agent identifiers corresponding to the observations.
-        num_envs (int): Number of parallel environments.
-        num_actors (int): Number of actors (e.g., agents or agent-environment pairs).
-
-    Returns:
-        dict: A dictionary mapping agent identifiers to their respective observations.
-
-    Purpose:
-    - Converts batched observations back into individual agent-specific observations 
-    for environment interactions.
-    - Maintains compatibility between network outputs and environment inputs.
-    """
-    x = x.reshape((num_actors, num_envs, -1)) # This reshapes the observation space to a 3D array with the shape (num_actors, num_envs, -1)
-    return {a: x[i] for i, a in enumerate(agent_list)} # This returns the observation space for the agents
+# Unused functions since we are handling batching manually
+# def batchify(x: dict, agent_list, num_actors):
+#     """Batchify observations for a single agent.
     
+#     This function stacks the observations for a single agent across multiple environments,
+#     reshaping them into a single array with shape (num_actors, -1).
+
+#     Args:
+#         x: Dictionary containing observations for a single agent
+#         agent_list: List of agent names
+#         num_actors: Number of parallel environments
+
+#     Returns:
+#         Batched observations with shape (num_actors, -1)
+#     """
+#     x = jnp.stack([x[a] for a in agent_list])
+#     return x.reshape((num_actors, -1))
+
+# def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
+#     """Convert batched array back to dict of agent observations.
+    
+#     This function reshapes the batched array back to a dictionary of observations for
+#     each agent, with shape (num_envs, -1).
+
+#     Args:
+#         x: Batched observations with shape (num_actors, num_envs, -1)
+#         agent_list: List of agent names
+#         num_envs: Number of parallel environments
+#         num_actors: Number of actors (agents)
+
+#     Returns:
+#         Dictionary containing observations for each agent
+#     """
+#     x = x.reshape((num_actors, num_envs, -1))
+#     return {a: x[i] for i, a in enumerate(agent_list)}
+
 def save_training_results(save_dir, out, config, prefix=""):
     """
     Save both complete training output and seed-specific parameters in JAX and pickle/npz formats.
@@ -462,76 +436,92 @@ def save_training_results(save_dir, out, config, prefix=""):
     else:
         print("Warning: No seed-specific parameters were successfully processed")
 
-def load_pretrained_params(path, is_complete=False):
+def load_fixed_partner(config):
     """
-    Simple function to load pretrained parameters from a file.
+    Loads pretrained partner policies and samples them according to NUM_ENVS.
     
     Args:
-        path: Direct path to the parameter file
-        is_complete: Whether to load complete training output
-    """
-    # Debug print
-    print(f"Attempting to load from path: {path}")
-    print(f"Path type: {type(path)}")
+        load_path (str): Path to the saved `params.pkl` file.
+        num_envs (int): Number of environments we need to match.
 
-    if isinstance(path, dict):
-        print("Path contents:", path)
-        raise TypeError("Path is a dictionary instead of a string path")
-        
-    if not os.path.exists(str(path)):
-        raise FileNotFoundError(f"No file found at: {path}")
-        
-    with open(path, 'rb') as f:
-        data = pickle.load(f)
-        
-    return jax.tree_util.tree_map(
-        lambda x: jax.numpy.array(x) if isinstance(x, np.ndarray) else x,
-        data
-    )
+    Returns:
+        dict: A dictionary mapping env indices to sampled partner parameters.
+    """
+    load_path = os.path.join(config["LOAD_PATH"], "params.pkl")
+    num_envs = config["NUM_ENVS"]
+
+    # Load parameters
+    with open(load_path, 'rb') as f:
+        loaded_params = pickle.load(f)
+
+    if not isinstance(loaded_params, dict):
+        raise ValueError(f"Expected dict but got {type(loaded_params)}. Check the saved params!")
+
+    # Available keys (seeds)
+    available_seeds = list(loaded_params.keys())  # Expected: ['seed_0', 'seed_1', ...]
+
+    if num_envs > len(available_seeds):
+        print(f"Warning: Requested {num_envs} environments but only {len(available_seeds)} seeds exist.")
+        print("Repeating seeds to fill all environments.")
+        sampled_seeds = random.choices(available_seeds, k=num_envs)  # Sample with replacement
+    else:
+        sampled_seeds = random.sample(available_seeds, num_envs)  # Sample without replacement
+
+    # Fix: No need for ['params'] since it's already the parameters
+    sampled_params = {f"env_{i}": loaded_params[seed] for i, seed in enumerate(sampled_seeds)}
+
+    return sampled_params
 
 def prepare_training_params(config):
-    """Load and prepare parameters for training."""
-    # Debug prints
-    print("\nConfig contents:")
-    print(f"LOAD_PATH: {config.get('LOAD_PATH')}")
-    print(f"LOAD_PATH type: {type(config.get('LOAD_PATH'))}")
+    """Load and prepare pretrained parameters for a fixed partner."""
+    # Load the saved parameters
+    load_path = os.path.join(config["LOAD_PATH"], "params.pkl")
+    with open(load_path, "rb") as f:
+        loaded_params = pickle.load(f)
+
+    if not isinstance(loaded_params, dict):
+        raise ValueError(f"Expected loaded params to be a dict, got {type(loaded_params)}")
+
+    if "params" not in loaded_params:
+        raise KeyError(f"Expected 'params' key in loaded params but found {loaded_params.keys()}")
+
+    # Convert loaded params to JAX-compatible format
+    loaded_params = flax.core.freeze(jax.tree_util.tree_map(jnp.array, loaded_params.params))
+
+    # Initialize the network structure
+    network = ActorCritic(
+        action_dim=config["DIMS"]["action_dim"], 
+        activation=config["ACTIVATION"]
+    )
     
-    if not config.get("LOAD_PATH"):
-        raise ValueError("LOAD_PATH must be specified in config")
-    
-    # Ensure path is a string
-    load_path = str(config["LOAD_PATH"])
-    
-    # look into jax.tree_map -> understand vmap and tree_map
-    try:
-        params = load_pretrained_params(load_path)
-        is_shared = not isinstance(params, dict) or 'agent_1' not in params
-        
-        if is_shared:
-            agent_params = params
-            print("Using shared network parameters")
-        else:
-            agent_params = params['agent_1']
-            print("Using agent_1 specific parameters")
-            
-        if config.get("NUM_ENVS"):
-            key = jax.random.PRNGKey(config["SEED"])
-            keys = list(params.keys())
-            indices = jax.device_get(
-                jax.random.randint(key, (config["NUM_ENVS"],), 0, len(keys))
-            )
-            sampled_params = {
-                f'env_{i}': params[keys[idx]] 
-                for i, idx in enumerate(indices)
-            }
-            return sampled_params, is_shared
-            
-        return agent_params, is_shared
-        
-    except Exception as e:
-        print(f"Error loading from {load_path}")
-        print(f"Full config: {config}")
-        raise e
+    key = jax.random.PRNGKey(0)
+    init_x = jnp.zeros((config["DIMS"]["base_obs_dim"],))  # Shape must match expected input
+
+    # Generate the expected parameter structure
+    initialized_params = network.init(key, init_x)
+
+    # Ensure correct structure: Merge loaded params with initialized params
+    final_params = flax.core.freeze({
+        k: loaded_params[k] if k in loaded_params else initialized_params[k]
+        for k in initialized_params
+    })
+
+    # Create an optimizer but don't use it (fixed partner)
+    tx = optax.chain(
+        optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+        optax.adam(config["LR"], eps=1e-5)
+    )
+
+    # Create a TrainState with the fixed parameters
+    fixed_train_state = TrainState.create(
+        apply_fn=network.apply,
+        params=final_params,
+        tx=tx  # Optimizer is needed but won't be used
+    )
+
+    print("Successfully loaded pretrained fixed partner.")
+    return fixed_train_state
+
 
 def create_visualization(train_state, config, filename, save_dir=None, agent_view_size=5):
     """Helper function to create and save visualization"""
@@ -568,6 +558,27 @@ def create_safe_filename(base_name, config, timestamp=None):
     
     return safe_name
 
+def load_sweep_config(path: str) -> Dict[Any, Any]:
+    """
+    Loads and validates WandB sweep configuration.
+    
+    Args:
+        path: Path to sweep YAML file
+        
+    Returns:
+        Dict containing sweep configuration
+    """
+    with open(path, 'r') as f:
+        sweep_config = yaml.safe_load(f)
+    
+    # Validate required fields
+    required_fields = ['method', 'metric', 'parameters']
+    for field in required_fields:
+        if field not in sweep_config:
+            raise ValueError(f"Sweep config missing required field: {field}")
+            
+    return sweep_config
+    
 def make_train(config):
     """Creates the main training function for IPPO with the given configuration.
     
@@ -680,12 +691,14 @@ def make_train(config):
 
         # Initialize seeds
         rng, _rng = jax.random.split(rng)
-        _rng_agent_0, _rng_agent_1 = jax.random.split(_rng)  # Split for two networks _rng_agent_1 is unused
+        _rng_agent_0, _rng_agent_1 = jax.random.split(_rng)  # Split for two networks
 
         # Initialize networks with correct dimensions from config
         init_x_agent_0 = jnp.zeros(dims["augmented_obs_dim"])  # Agent 0 gets augmented obs
+        pretrained_partner = prepare_training_params(config)
         
         network_params_agent_0 = network.init(_rng_agent_0, init_x_agent_0)
+        network_params_agent_1 = pretrained_partner
         
         def create_optimizer(config):
             """Creates an optimizer chain for training each agent's neural network.
@@ -717,19 +730,23 @@ def make_train(config):
                 )
             return tx
 
-        # Create separate optimizer chains for each agent and only keep the one for agent_0 since this is the learning agent
+        # Create separate optimizer chains for each agent
         tx_agent_0 = create_optimizer(config)
+        tx_agent_1 = create_optimizer(config)
 
-        # Create train state for agent_0 only
-        train_state = TrainState.create(
-            apply_fn=network.apply,
-            params=network_params_agent_0,
-            tx=tx_agent_0
-        )
-
-        # Store agent_1's pretrained params separately
-        pretrained_params = load_pretrained_params(config)
-        agent_1_params = pretrained_params  # From load_and_process_pretrained
+        # Create separate train states
+        train_state = {
+            'agent_0': TrainState.create(
+                apply_fn=network.apply,
+                params=network_params_agent_0,
+                tx=tx_agent_0
+            ),
+            'agent_1': TrainState.create(
+                apply_fn=network.apply,
+                params=network_params_agent_1,
+                tx=tx_agent_1
+            )
+        }
         
         # Initialize environment states
         rng, _rng = jax.random.split(rng)
@@ -763,80 +780,57 @@ def make_train(config):
                     - Metrics dictionary with training statistics
             """
             # COLLECT TRAJECTORIES
-            def _env_step(runner_state, unused, dims=dims):
-                """Collects trajectories by running the current policy in the environment.
-                
-                Agent_1 uses fixed pretrained parameters while agent_0 learns through interaction.
-                We only collect transition data for agent_0 since agent_1's policy is fixed.
-                """
+            def _env_step(runner_state, unused, dims, pretrained_partner):
                 train_state, env_state, last_obs, update_step, rng = runner_state
 
-                # Split RNGs for action sampling
-                rng, _rng = jax.random.split(rng)
-                _rng_agent_0, _rng_agent_1 = jax.random.split(_rng)
+                # # Process agent_1 with fixed pre-trained parameters
+                # def process_fixed_agent(env_idx, obs):
+                #     agent_1_obs = obs["agent_1"].reshape(-1)  # Flatten observation
+                #     pi_1, _ = network.apply(fixed_partner_params[env_idx], agent_1_obs)  # Use pre-trained params
+                #     return pi_1.sample(seed=jax.random.PRNGKey(env_idx))  # Sample action
 
-                # Process agent_1 first (using pretrained parameters)
-                agent_1_obs = last_obs['agent_1'].reshape(last_obs['agent_1'].shape[0], -1)
-                # line 780 to 783 might be incorrect, nik thinks it's vmap over agent 1 params
-                agent_1_pi, _ = jaxc.vmap(network.apply, in_axes=(None, 0))(
-                    agent_1_params,  # This should be passed into make_train and available here
-                    agent_1_obs
-                )
-                agent_1_action = agent_1_pi.sample(seed=_rng_agent_1)
+                # agent_1_actions = jax.vmap(process_fixed_agent)(jnp.arange(config["NUM_ENVS"]), last_obs)
+                # `agent_1` selects an action using the fixed pretrained policy
+                pi_1, _ = network.apply(pretrained_partner, last_obs["agent_1"])
+                agent_1_actions = pi_1.sample(seed=jax.random.PRNGKey(update_step))
 
-                # Process agent_0 (the learning agent)
-                agent_0_obs = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1)
-                one_hot_action = jax.nn.one_hot(agent_1_action, dims["action_dim"])
-                agent_0_obs_augmented = jnp.concatenate([agent_0_obs, one_hot_action], axis=-1)
+                # Process agent_0 (learning agent)
+                agent_0_obs = last_obs["agent_0"].reshape(config["NUM_ENVS"], -1)  # Flatten batch
+                pi_0, value_0 = network.apply(train_state["agent_0"].params, agent_0_obs)  # Learning agent
+                agent_0_actions = pi_0.sample(seed=jax.random.PRNGKey(update_step))
+
+                actions = {"agent_0": agent_0_actions, "agent_1": agent_1_actions}
                 
-                # Get agent_0's action and value using training parameters
-                agent_0_pi, agent_0_value = network.apply(
-                    train_state.params,
-                    agent_0_obs_augmented
-                )
-                agent_0_action = agent_0_pi.sample(seed=_rng_agent_0)
-                agent_0_log_prob = agent_0_pi.log_prob(agent_0_action)
-
-                # Package actions for environment step
-                env_act = {
-                    "agent_0": agent_0_action,
-                    "agent_1": agent_1_action
-                }
-                env_act = {k: v.flatten() for k, v in env_act.items()}
-
                 # Step environment
-                rng, _rng = jax.random.split(rng)
-                rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-                obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0,0,0))(
-                    rng_step, env_state, env_act
+                rng, step_rng = jax.random.split(rng)
+                next_obs, next_state, rewards, dones, infos = jax.vmap(env.step)(
+                    jax.random.split(step_rng, config["NUM_ENVS"]), env_state, actions
                 )
 
-                # Store reward and apply shaping (only for agent_0)
-                info["reward"] = reward["agent_0"]
-                current_timestep = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
-                shaped_reward = reward["agent_0"] + info["shaped_reward"]["agent_0"] * rew_shaping_anneal(current_timestep)
-
-                # Create transition only for agent_0
                 transition = Transition(
-                    done=done["agent_0"],
-                    action=agent_0_action,
-                    value=agent_0_value,
-                    reward=shaped_reward,
-                    log_prob=agent_0_log_prob,
-                    obs=agent_0_obs_augmented
+                    done=dones["agent_0"], action=agent_0_actions, value=value_0,
+                    reward=rewards["agent_0"], log_prob=pi_0.log_prob(agent_0_actions), obs=agent_0_obs
                 )
 
-                runner_state = (train_state, env_state, obsv, update_step, rng)
-                return runner_state, (transition, info)
+                runner_state = (train_state, next_state, next_obs, update_step, rng)
+                return runner_state, (transition, infos)
 
             runner_state, (traj_batch, info, processed_obs) = jax.lax.scan(
-                _env_step, runner_state, None, config["NUM_STEPS"]
+                lambda state, _: _env_step(state, _, dims, pretrained_partner),
+                runner_state,
+                None,
+                config["NUM_STEPS"]
             )
             
             # CALCULATE ADVANTAGE
             train_state, env_state, last_obs, update_step, rng = runner_state
             
-            # Calculate last values for agent_0
+            # Calculate last values for both agents
+            print("\nCalculating last values:")
+            last_obs_agent1 = last_obs['agent_1'].reshape(last_obs['agent_1'].shape[0], -1)
+            _, agent_1_last_val = network.apply(train_state['agent_1'].params, last_obs_agent1)
+            print("agent_1_last_val shape:", agent_1_last_val.shape)
+
             # For agent_0, need to include agent_1's last action in observation
             one_hot_last_action = jax.nn.one_hot(traj_batch.action[-1, 1], env.action_space().n)
             last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1)
@@ -845,7 +839,8 @@ def make_train(config):
             print("agent_0_last_val shape:", agent_0_last_val.shape)
 
             # Combine values for advantage calculation
-            _, last_val = network.apply(train_state.params, last_obs_agent0_augmented)
+            last_val = jnp.array([agent_0_last_val, agent_1_last_val])
+            print("stacked last_val shape:", last_val.shape)
 
             # calculate_gae itself didn't need to be changed because we can use the same advantage function for both agents
             def _calculate_gae(traj_batch, last_val):
@@ -892,6 +887,15 @@ def make_train(config):
                         transition.value,
                         transition.reward,
                     )
+
+                    # Debug intermediate calculations
+                    print(f"\nGAE step debug:")
+                    print(f"done shape: {done.shape}")
+                    print(f"value shape: {value.shape}")
+                    print(f"reward shape: {reward.shape}")
+                    print(f"next_value shape: {next_value.shape}")
+                    print(f"gae shape: {gae.shape}")
+
         
                      # Calculate delta and GAE per agent
                     delta = reward + config["GAMMA"] * next_value * (1 - done) - value
@@ -1034,30 +1038,33 @@ def make_train(config):
                         
                         return total_loss, loss_info
 
-                    # Create separate loss functions for each agent, and only keep the agent_0 since we don't need agent_1
+                    # Create separate loss functions for each agent
                     loss_fn_agent_0 = partial(_loss_fn, agent_type='agent_0')
-                    # loss_fn_agent_1 = partial(_loss_fn, agent_type='agent_1')
 
-                    # Create gradient function, same as before
+                    # Create gradient functions
                     grad_fn_0 = jax.value_and_grad(loss_fn_agent_0, has_aux=True)
-                    # grad_fn_1 = jax.value_and_grad(loss_fn_agent_1, has_aux=True)
     
                     # Compute gradients for agent 0
                     (loss_0, aux_0), grads_0 = grad_fn_0(
-                        train_state.params,
-                        traj_batch,
-                        advantages,
-                        targets
+                        train_state['agent_0'].params,
+                        agent_0_data['traj'],
+                        agent_0_data['advantages'],
+                        agent_0_data['targets']
                     )
-
+                    
                     print("\nGradient stats:")
                     print(f"Grad norm agent_0: {optax.global_norm(grads_0)}")
-                    # print(f"Grad norm agent_1: {optax.global_norm(grads_1)}")
                     
-                    # Update only agent_0
-                    train_state = train_state.apply_gradients(grads=grads_0)
+                    # Update both agents' parameters separately
+                    train_state = {
+                        'agent_0': train_state['agent_0'].apply_gradients(grads=grads_0),
+                    }
+    
+                    # Combine losses for logging
+                    total_loss = loss_0 + loss_1
+                    combined_aux = jax.tree_map(lambda x, y: (x + y) / 2, aux_0, aux_1)
                     
-                    return train_state, (loss_0, aux_0)
+                    return train_state, (total_loss, combined_aux)
 
                 train_state, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
@@ -1069,7 +1076,36 @@ def make_train(config):
                 # Verify that the data can be evenly split into minibatches
                 assert (
                     batch_size % config["NUM_MINIBATCHES"] == 0
-                ), "Steps * Envs must be divisible by number of minibatches"               # Shape: (128, 16)
+                ), "Steps * Envs must be divisible by number of minibatches"
+
+                # Separate data for each agent, separate the individual components of the transitions explicitly 
+                # to handle different observation size
+                agent_data = {
+                    'agent_0': {
+                    'traj': Transition(
+                        done=traj_batch.done[:, 0],           # Shape: (128, 16)
+                        action=traj_batch.action[:, 0],       # Shape: (128, 16)
+                        value=traj_batch.value[:, 0],         # Shape: (128, 16)
+                        reward=traj_batch.reward[:, 0],       # Shape: (128, 16)
+                        log_prob=traj_batch.log_prob[:, 0],   # Shape: (128, 16)
+                        obs=traj_batch.obs['agent_0']         # Shape: (128, 526)
+                    ),
+                    'advantages': advantages[:, 0],           # Shape: (128, 16)
+                    'targets': targets[:, 0]                  # Shape: (128, 16)
+                },
+                    'agent_1': {
+                        'traj': Transition(
+                            done=traj_batch.done[:, 1],           # Shape: (128, 16)
+                            action=traj_batch.action[:, 1],       # Shape: (128, 16)
+                            value=traj_batch.value[:, 1],         # Shape: (128, 16)
+                            reward=traj_batch.reward[:, 1],       # Shape: (128, 16)
+                            log_prob=traj_batch.log_prob[:, 1],   # Shape: (128, 16)
+                            obs=traj_batch.obs['agent_1']         # Shape: (128, 520)
+                        ),
+                        'advantages': advantages[:, 1],           # Shape: (128, 16)
+                        'targets': targets[:, 1]                  # Shape: (128, 16)
+                    }
+                }
 
                 #print("\nBatch processing, Pre-reshape diagnostics:")
                 #print("agent_0 obs structure:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), agent_data['agent_0']['traj'].obs))
@@ -1135,7 +1171,7 @@ def make_train(config):
                 # After reshaping:
                 print("\nPost-reshape diagnostics:")
                 print("Reshaped agent_0 obs:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), agent_data['agent_0']['traj'].obs))
-                # print("Reshaped agent_1 obs:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), agent_data['agent_1']['traj'].obs))
+                print("Reshaped agent_1 obs:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), agent_data['agent_1']['traj'].obs))
 
                 # Create permutation and shuffle
                 permutation = jax.random.permutation(_rng, batch_size)
@@ -1233,7 +1269,7 @@ def make_train(config):
 
     return train
 
-@hydra.main(version_base=None, config_path="config", config_name="adaptability")
+@hydra.main(version_base=None, config_path="config", config_name="base_config")
 def main(config):
     """Main entry point for training
     
@@ -1254,6 +1290,7 @@ def main(config):
     # Hydra's config path
     print("\nHydra Config Info:")
     print(f"Config Path: {hydra.utils.get_original_cwd()}/config")
+    print(f"Config Name: base_config")
     
     #print current working directory
     print(f"Current Directory: {os.getcwd()}")
@@ -1295,16 +1332,14 @@ def main(config):
         "augmented_obs_dim": augmented_obs_dim
     }
 
-    agent_1_params, is_shared_params = load_pretrained_params(config["LOAD_PATH"])
-
     # Initialize wandb logging
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
-        tags=["IPPO", "FF", "Adaptability", "Oracle"],
+        tags=["IPPO", "FF", "SplitNetwork", "Oracle"],
         config=config,
         mode=config["WANDB_MODE"],
-        name=f'adaptability_ff_ippo_oc_{config["ENV_KWARGS"]["layout"]}'
+        name=f'oracle_ff_ippo_overcooked_{config["ENV_KWARGS"]["layout"]}'
     )
 
     print("\nVerifying config before rollout:")
@@ -1321,7 +1356,7 @@ def main(config):
     config["ENV_KWARGS"]["layout"] = overcooked_layouts[layout_name]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
-    model_dir_name = create_safe_filename("adaptability_ff_ippo_oc", config, timestamp)
+    model_dir_name = create_safe_filename("oracle_ff_ippo_oc", config, timestamp)
     save_dir = os.path.join(
         "saved_models", 
         date,
@@ -1338,7 +1373,7 @@ def main(config):
     out = jax.vmap(train_jit)(rngs)
 
     # Save parameters and results
-    save_training_results(save_dir, out, config, prefix="adaptability_")
+    save_training_results(save_dir, out, config, prefix="oracle_ff_ippo_oc_")
     np.savez(os.path.join(save_dir, "metrics.npz"), 
              **{key: np.array(value) for key, value in out["metrics"].items()})
     
@@ -1349,7 +1384,7 @@ def main(config):
 
     # Generate and save visualization
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-    viz_base_name = create_safe_filename("adaptability", config, timestamp)
+    viz_base_name = create_safe_filename("oracle_ff_ippo_oc", config, timestamp)
     viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
     create_visualization(train_state, config, viz_filename, save_dir)
     

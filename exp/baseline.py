@@ -292,13 +292,13 @@ def save_training_results(save_dir, out, config, prefix=""):
             print(f"Warning: Skipping unpickleable key '{key}' in output due to: {str(e)}")
 
     # Save the entire training output in pickle and npz formats
-    pickle_out_path = os.path.join(save_dir, f"{prefix}complete_out.pkl")
+    pickle_out_path = os.path.join(save_dir, f"complete_out.pkl")
     with open(pickle_out_path, 'wb') as f:
         pickle.dump(pickle_safe_out, f)
     print(f"Saved complete training output in pickle format: {pickle_out_path}")
 
     # Save the complete output in npz format (for compatibility)
-    npz_out_path = os.path.join(save_dir, f"{prefix}complete_out.npz")
+    npz_out_path = os.path.join(save_dir, f"complete_out.npz")
     np.savez(npz_out_path, **pickle_safe_out)
     print(f"Saved complete training output in npz format: {npz_out_path}")
 
@@ -355,19 +355,19 @@ def save_training_results(save_dir, out, config, prefix=""):
     # Save seed-specific parameters if we have any
     if all_seeds_params:
         # Save as pickle first (our validation format)
-        pickle_seeds_path = os.path.join(save_dir, f"{prefix}all_seeds_params.pkl")
+        pickle_seeds_path = os.path.join(save_dir, f"all_seeds_params.pkl")
         with open(pickle_seeds_path, 'wb') as f:
             pickle.dump(all_seeds_params, f)
         print(f"Saved all seed-specific parameters in pickle format: {pickle_seeds_path}")
         
         # Then save as npz for compatibility
-        npz_seeds_path = os.path.join(save_dir, f"{prefix}all_seeds_params.npz")
+        npz_seeds_path = os.path.join(save_dir, f"all_seeds_params.npz")
         np.savez(npz_seeds_path, **all_seeds_params)
         print(f"Saved all seed-specific parameters in npz format: {npz_seeds_path}")
     else:
         print("Warning: No seed-specific parameters were successfully processed")
 
-def load_training_results(load_dir, prefix="", load_type="params"):
+def load_training_results(load_dir, load_type="params"):
     """
     Load training results from pickle format
     
@@ -379,7 +379,7 @@ def load_training_results(load_dir, prefix="", load_type="params"):
         Loaded data converted to JAX arrays where appropriate
     """
     if load_type == "params":
-        pickle_path = os.path.join(load_dir, f"{prefix}params_pickle.pkl")
+        pickle_path = os.path.join(load_dir, f"params.pkl")
         if os.path.exists(pickle_path):
             print("Loading params from pickle format...")
             with open(pickle_path, 'rb') as f:
@@ -391,7 +391,7 @@ def load_training_results(load_dir, prefix="", load_type="params"):
                 )
                 
     elif load_type == "complete":
-        pickle_path = os.path.join(load_dir, f"{prefix}complete_out_pickle.pkl")
+        pickle_path = os.path.join(load_dir, f"complete_out.pkl")
         if os.path.exists(pickle_path):
             print("Loading complete output from pickle format...")
             with open(pickle_path, 'rb') as f:
@@ -402,7 +402,7 @@ def load_training_results(load_dir, prefix="", load_type="params"):
                     out
                 )
     
-    raise FileNotFoundError(f"No saved {load_type} found in {load_dir} with prefix {prefix}")
+    raise FileNotFoundError(f"No saved {load_type} found in {load_dir}")
 
 def create_visualization(train_state, config, filename, save_dir=None, agent_view_size=5):
     """Helper function to create and save visualization"""
@@ -865,8 +865,8 @@ def main(hydra_config):
     train_jit = jax.jit(make_train(config))
     out = jax.vmap(train_jit)(rngs)
 
-    with open(os.path.join(save_dir, "params.pkl"), 'wb') as f:
-        pickle.dump(out["runner_state"][0].params, f)
+    # with open(os.path.join(save_dir, "params.pkl"), 'wb') as f:
+    #     pickle.dump(out["runner_state"].params, f)
     
     # Save results and generate visualizations
     save_training_results(save_dir, out, config, prefix="bl_ff_ippo_oc_")

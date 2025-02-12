@@ -864,12 +864,13 @@ def main(hydra_config):
     rngs = jax.random.split(rng, config["NUM_SEEDS"])    
     train_jit = jax.jit(make_train(config))
     out = jax.vmap(train_jit)(rngs)
-    # pickle.dump(out["runner_state"].params, open(os.path.join(save_dir, "out.pkl"), "wb"))
+
+    with open(os.path.join(save_dir, "params.pkl"), 'wb') as f:
+        pickle.dump(out["runner_state"][0].params, f)
     
     # Save results and generate visualizations
     save_training_results(save_dir, out, config, prefix="bl_ff_ippo_oc_")
-    np.savez(os.path.join(save_dir, "metrics.npz"), 
-             **{key: np.array(value) for key, value in out["metrics"].items()})
+    np.savez(os.path.join(save_dir, "metrics.npz"), **{key: np.array(value) for key, value in out["metrics"].items()})
     
     with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
         pickle.dump(config, f)

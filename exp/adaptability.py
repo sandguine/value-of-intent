@@ -184,9 +184,10 @@ def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=
         agent_1_params: Pretrained parameters for partner agent
         is_shared_params: Boolean flag for shared vs. separate parameters
         config: Dictionary containing environment and training configuration
+        save_dir: Optional directory to save rollout plots.
         
     Returns:
-        Episode trajectory data including states, rewards, and shaped rewards
+        Dictionary containing episode trajectory data including states, rewards, and shaped rewards.
     """
     if "DIMS" not in config:
         raise ValueError("Config is missing DIMS dictionary. Check that dimensions were properly initialized in main()")
@@ -229,20 +230,20 @@ def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=
     while not done:
         key, key_a0, key_a1, key_s = jax.random.split(key, 4)
 
-        # Process partner agent (Baseline, no augmentation)
-        agent_1_obs = obs["agent_1"].flatten()
+        # Ensure agent_1 receives the correct observations
+        agent_1_obs = obs["agent_1"].reshape(-1)
 
         if is_shared_params:
-            pi_1, _ = network.apply(agent_1_params, agent_1_obs)
+            pi_1, _ = network.apply(train_state.params, agent_1_obs)  # Use shared params
         else:
             pi_1, _ = network.apply(agent_1_params, agent_1_obs)
-        
+
         action_1 = pi_1.sample(seed=key_a1)
 
-        # Process learning agent (Oracle: Augmented, Baseline: Raw)
-        agent_0_obs = obs["agent_0"].flatten()
+        # Ensure agent_0 receives correctly formatted observations
+        agent_0_obs = obs["agent_0"].reshape(-1)
 
-        if config["AGENT_TYPE"] == "oracle":
+        if config.get("AUGMENT_OBS", False):  # Match augmentation logic in training
             one_hot_action = jax.nn.one_hot(action_1, env.action_space().n)
             agent_0_obs = jnp.concatenate([agent_0_obs, one_hot_action])
 
@@ -255,16 +256,14 @@ def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=
         }
 
         obs, state, reward, done, info = env.step(key_s, state, actions)
-        done = done["__all__"]
+        done = done["agent_0"]  # Ensure we track `agent_0`'s termination condition
 
         rewards.append(reward['agent_0'])
         shaped_rewards.append(info["shaped_reward"]['agent_0'])
 
         state_seq.append(state)
 
-    # Plot rewards
-    import matplotlib.pyplot as plt
-
+    # Save reward plot if directory is provided
     plt.plot(rewards, label="reward")
     plt.plot(shaped_rewards, label="shaped_reward")
     plt.legend()
@@ -272,7 +271,12 @@ def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=
         plt.savefig(os.path.join(save_dir, "reward_plot.png"))
     plt.close()
 
-    return state_seq
+    # Return rollout data for further analysis
+    return {
+        "state_seq": state_seq,
+        "rewards": rewards,
+        "shaped_rewards": shaped_rewards
+    }
 
 def batchify(x: dict, agent_list, num_actors):
     """Converts individual agent observations into a batched tensor."""
@@ -444,7 +448,7 @@ def save_training_results(save_dir, out, config, prefix=""):
         print(f"Saved all seed-specific parameters in pickle format: {pickle_seeds_path}")
         
         # Then save as npz for compatibility
-        npz_seeds_path = os.path.join(save_dir, f"{prefix}all_seeds_params.npz")
+        npz_seeds_path = os.path.join(save_dir, f"params.npz")
         np.savez(npz_seeds_path, **all_seeds_params)
         print(f"Saved all seed-specific parameters in npz format: {npz_seeds_path}")
     else:
@@ -1006,30 +1010,81 @@ def make_train(config):
 
                 return (train_state, traj_batch, advantages, targets, rng), total_loss
 
+            # update_state = (train_state, traj_batch, advantages, targets, rng)
+            # update_state, loss_info = jax.lax.scan(
+            #     lambda state, _: _update_epoch(state, _, config),
+            #     update_state, 
+            #     None, 
+            #     config["UPDATE_EPOCHS"]
+            # )
+
+            # train_state = update_state[0]
+            # metric = info
+            # current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
+            # metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
+            # metric["shaped_reward_annealed"] = metric.get("shaped_reward", 0) * rew_shaping_anneal(current_timestep)
+            # rng = update_state[-1]
+            # def callback(metric):
+            #     wandb.log(
+            #         metric
+            #     )
+            # update_step = update_step + 1
+            # metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
+            # metric["update_step"] = update_step
+            # metric["env_step"] = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
+            # jax.debug.callback(callback, metric)
+            
+            # runner_state = (train_state, env_state, last_obs, update_step, rng)
+            # return runner_state, metric
             update_state = (train_state, traj_batch, advantages, targets, rng)
             update_state, loss_info = jax.lax.scan(
                 lambda state, _: _update_epoch(state, _, config),
-                update_state, 
-                None, 
+                update_state,
+                None,
                 config["UPDATE_EPOCHS"]
             )
 
             train_state = update_state[0]
+
+            # Extract training metrics
             metric = info
-            current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
-            metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
-            metric["shaped_reward_annealed"] = metric.get("shaped_reward", 0) * rew_shaping_anneal(current_timestep)
-            rng = update_state[-1]
-            def callback(metric):
-                wandb.log(
-                    metric
-                )
-            update_step = update_step + 1
-            metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
-            metric["update_step"] = update_step
-            metric["env_step"] = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
-            jax.debug.callback(callback, metric)
+            current_timestep = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+
+            # Prevent JAX tracing issue
+            update_step = jax.lax.stop_gradient(update_step)
+
+            # Store individual seed metrics
+            loggable_metrics = {}
+            num_seeds = config["NUM_SEEDS"]
+
+            for seed_idx in range(num_seeds):
+                # Log reward-based metrics
+                loggable_metrics[f"seed_{seed_idx}/shaped_reward"] = float(metric["shaped_reward"]["agent_0"][seed_idx])
+                loggable_metrics[f"seed_{seed_idx}/shaped_reward_annealed"] = float(metric.get("shaped_reward", 0)[seed_idx]) * rew_shaping_anneal(current_timestep)
+
+                # Adaptability metrics
+                loggable_metrics[f"seed_{seed_idx}/policy_entropy"] = float(metric["policy_entropy"][seed_idx])
+                loggable_metrics[f"seed_{seed_idx}/kl_divergence"] = float(metric["kl_divergence"][seed_idx])
+                loggable_metrics[f"seed_{seed_idx}/value_loss"] = float(metric["value_loss"][seed_idx])
+                loggable_metrics[f"seed_{seed_idx}/adaptation_rate"] = float(metric["adaptation_rate"][seed_idx])
+                loggable_metrics[f"seed_{seed_idx}/success_rate"] = float(metric["success_rate"][seed_idx])
+                loggable_metrics[f"seed_{seed_idx}/policy_diversity"] = float(metric["policy_diversity"][seed_idx])
+
+            # Log update step and env step separately
+            loggable_metrics["update_step"] = int(update_step)
+            loggable_metrics["env_step"] = int(update_step * config["NUM_STEPS"] * config["NUM_ENVS"])
+
+            # Compute aggregated metrics separately
+            aggregated_metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
+            aggregated_metric["update_step"] = int(update_step)
+            aggregated_metric["env_step"] = int(update_step * config["NUM_STEPS"] * config["NUM_ENVS"])
+
+            # Log metrics using `jax.debug.callback`
+            def callback():
+                wandb.log(loggable_metrics)
             
+            jax.debug.callback(callback)
+
             runner_state = (train_state, env_state, last_obs, update_step, rng)
             return runner_state, metric
 

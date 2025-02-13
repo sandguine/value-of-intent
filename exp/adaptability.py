@@ -734,6 +734,9 @@ def make_train(config):
             Returns:
                 Updated runner state and metric dictionary.
             """
+            # Initialize metric for logging
+            metric = {}
+
             # COLLECT TRAJECTORIES
             def _env_step(runner_state, unused, pretrained_params):
                 """
@@ -779,6 +782,9 @@ def make_train(config):
                 agent_0_action = agent_0_pi.sample(seed=rng_action_0)
                 agent_0_log_prob = agent_0_pi.log_prob(agent_0_action)
 
+                # Log policy entropy to measure policy uncertainty: Higher entropy = more exploration, Lower entropy = more exploitation.
+                policy_entropy = agent_0_pi.entropy().mean()
+
                 # Step the environment
                 actions = {"agent_0": agent_0_action, "agent_1": agent_1_action}
                 next_obs, next_env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0))(
@@ -796,6 +802,16 @@ def make_train(config):
                     log_prob=agent_0_log_prob,
                     obs=agent_0_obs_augmented,
                 )
+
+                # Compute adaptability metrics
+                success_rate = jnp.mean(done["agent_0"])  # Fraction of finished episodes
+                prev_reward = reward["agent_0"]
+                adaptation_rate = reward["agent_0"] / (prev_reward + 1e-8)  # Compare current vs. previous reward
+
+                # Store additional metrics inside `info`
+                info["policy_entropy"] = policy_entropy
+                info["success_rate"] = success_rate
+                info["adaptation_rate"] = adaptation_rate
 
                 runner_state = (train_state, next_env_state, next_obs, update_step, rng)
                 return runner_state, (transition, info)
@@ -889,6 +905,15 @@ def make_train(config):
                     advantages = agent_0_data['advantages']
                     targets = agent_0_data['targets']
 
+                    # Calculate KL divergence between old and new policy
+                    pi_0, _ = network.apply(train_state.params, traj_batch.obs)
+                    old_pi_0 = jax.lax.stop_gradient(pi_0)  # Store previous policy
+                    kl_divergence = jnp.mean(jnp.sum(pi_0.log_prob(traj_batch.action) - old_pi_0.log_prob(traj_batch.action), axis=-1))
+
+                    # Calculate value loss
+                    value_loss = jnp.mean((traj_batch.value - targets) ** 2)
+                    policy_entropy = jnp.mean(pi_0.entropy())
+
                     def _loss_fn(params, traj_batch, gae, targets, config):
                         """Calculate loss for agent_0."""
                         pi, value = network.apply(params, traj_batch.obs)
@@ -925,6 +950,12 @@ def make_train(config):
                             'total_loss': total_loss
                         }
 
+                    metric = {
+                        "kl_divergence": kl_divergence,
+                        "value_loss": value_loss,
+                        "policy_entropy": policy_entropy
+                    }
+                    
                     # Compute gradients for agent 0
                     grad_fn_0 = jax.value_and_grad(lambda p: _loss_fn(p, traj_batch, advantages, targets, config), has_aux=True)
                     (loss_0, aux_0), grads_0 = grad_fn_0(train_state.params)
@@ -991,7 +1022,7 @@ def make_train(config):
                     return {
                         'traj': Transition(**{
                             field: getattr(data["traj"], field).reshape((config["NUM_MINIBATCHES"], -1) + getattr(data["traj"], field).shape[1:])
-                            for field in data["traj"]._fields  # ✅ Use data["traj"]
+                            for field in data["traj"]._fields  # Use data["traj"]
                         }),
                         'advantages': data["advantages"].reshape((config["NUM_MINIBATCHES"], -1)),
                         'targets': data["targets"].reshape((config["NUM_MINIBATCHES"], -1))
@@ -1046,23 +1077,50 @@ def make_train(config):
 
             train_state = update_state[0]
 
-            # Extract training metrics
             metric = info
             current_timestep = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
 
-            # Prevent JAX tracing issue
             update_step = jax.lax.stop_gradient(update_step)
+
+            # Calculate policy diversity as the variance of agent_1's actions
+            policy_diversity = jax.numpy.var(traj_batch.action[:, 1])  # Assuming agent_1 is at index 1
+            metric["policy_diversity"] = policy_diversity
+
+            metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
+            metric["shaped_reward_annealed"] = metric.get("shaped_reward", 0) * rew_shaping_anneal(current_timestep)
+            metric["policy_entropy"] = jnp.mean(info["policy_entropy"])
+            metric["success_rate"] = jnp.mean(info["success_rate"])
+            metric["adaptation_rate"] = jnp.mean(info["adaptation_rate"])
+
+            # Extract training metrics
+            # metric = info
+            # current_timestep = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+
+            # # Prevent JAX tracing issue
+            # update_step = jax.lax.stop_gradient(update_step)
+
+            # Calculate metrics for adaptability testing
+            # metric["policy_entropy"] = jnp.mean(traj_batch.log_prob)  # Using log_prob as entropy proxy
+            # metric["kl_divergence"] = jnp.mean(jnp.sum(traj_batch.log_prob - jax.lax.stop_gradient(traj_batch.log_prob), axis=-1))
+            # metric["value_loss"] = jnp.mean((traj_batch.value - targets) ** 2)
+            # metric["adaptation_rate"] = jnp.mean(traj_batch.reward[1:] / (traj_batch.reward[:-1] + 1e-8))  # Avoid division by zero
+            # metric["success_rate"] = jnp.mean(info["success"])  # Assuming success is stored in `info`
+            # metric["policy_diversity"] = jnp.var(traj_batch.action[:, 1])  # Assuming agent_1 is at index 1
+
+            # Compute per-agent shaped rewards
+            metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
+            metric["shaped_reward_annealed"] = metric.get("shaped_reward", 0) * rew_shaping_anneal(current_timestep)
 
             # Store individual seed metrics
             loggable_metrics = {}
             num_seeds = config["NUM_SEEDS"]
 
             for seed_idx in range(num_seeds):
-                # Log reward-based metrics
-                loggable_metrics[f"seed_{seed_idx}/shaped_reward"] = float(metric["shaped_reward"]["agent_0"][seed_idx])
+                # Log per-seed rewards
+                loggable_metrics[f"seed_{seed_idx}/shaped_reward"] = float(metric["shaped_reward"][seed_idx])
                 loggable_metrics[f"seed_{seed_idx}/shaped_reward_annealed"] = float(metric.get("shaped_reward", 0)[seed_idx]) * rew_shaping_anneal(current_timestep)
 
-                # Adaptability metrics
+                # Log per-seed adaptability metrics
                 loggable_metrics[f"seed_{seed_idx}/policy_entropy"] = float(metric["policy_entropy"][seed_idx])
                 loggable_metrics[f"seed_{seed_idx}/kl_divergence"] = float(metric["kl_divergence"][seed_idx])
                 loggable_metrics[f"seed_{seed_idx}/value_loss"] = float(metric["value_loss"][seed_idx])
@@ -1070,21 +1128,17 @@ def make_train(config):
                 loggable_metrics[f"seed_{seed_idx}/success_rate"] = float(metric["success_rate"][seed_idx])
                 loggable_metrics[f"seed_{seed_idx}/policy_diversity"] = float(metric["policy_diversity"][seed_idx])
 
-            # Log update step and env step separately
-            loggable_metrics["update_step"] = int(update_step)
-            loggable_metrics["env_step"] = int(update_step * config["NUM_STEPS"] * config["NUM_ENVS"])
-
             # Compute aggregated metrics separately
             aggregated_metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
             aggregated_metric["update_step"] = int(update_step)
             aggregated_metric["env_step"] = int(update_step * config["NUM_STEPS"] * config["NUM_ENVS"])
 
-            # Log metrics using `jax.debug.callback`
             def callback():
-                wandb.log(loggable_metrics)
+                wandb.log({**loggable_metrics, **aggregated_metric})
             
             jax.debug.callback(callback)
 
+            # Return updated runner state and aggregated metrics
             runner_state = (train_state, env_state, last_obs, update_step, rng)
             return runner_state, metric
 

@@ -2,7 +2,6 @@
 SEED: 30                              # Random seed for reproducibility
 NUM_SEEDS: 100                         # Default for hyperparameter tuning (use 100 for adaptability tests)
 TRAINING_MODE: standard               # Options: adaptability, standard
-PARTNER_MODEL_PATH: /path/to/pretrained_partner_model.pkl
 AGENT_TYPE: "baseline"                # Options: baseline, oracle
 SHARED_POLICY: true                   # Whether to use a shared policy for the agents
 

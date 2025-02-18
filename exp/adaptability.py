@@ -2,11 +2,11 @@
 [1] Only need to load the parameters from pre-trained of the partner agent.
 [1] Everytime network.apply is being called is when we need to passed along either trainstate.params or pretrained parameters from fixed partners.
     [1] Basically, just used the load_training_results for network.apply agent_1 to load and sample properly, sample equal to numbers of NUM_ENVS.
-    [0] Pretty sure that in get_rollout, the while not done is to apply to each seed multiple times so we could just used from sampled. <- Double check this
+    [1] Pretty sure that in get_rollout, the while not done is to apply to each seed multiple times so we could just used from sampled. <- Double check this
 [1] Network initialization need to be done only for agent_0.
 [1] Update advantages, train states etc. only on self.
     [1] As for fixed just keep using the fix params no updates.
-    [0] Double check the size of dictionary. We can use agent_0 data directly or wrapped under dict if dimension mismatched.
+    [1] Double check the size of dictionary. We can use agent_0 data directly or wrapped under dict if dimension mismatched.
 [1] There shouldn't be much changed at all to this version except for loading the save params from pre-trained.
 [1] Need to get the save and visualization functions correctly from baseline.
 [0] Need to plot to wandb correctly, either each seed individually or find the right aggregating methods for all seeds.
@@ -14,8 +14,8 @@
         [0] This could also reveal characteristics of the partner policy or self that make it s.t. total reward is higher.
         [0] This might reveal info behaviorally that may have been previously neglected.
 [1] Maybe look and compare to the oracle_shared as well on the batchify and unbatchify. -> handle this a bit differently through _env_step instead
-[0] Double check in the all dictionary elements that we can use agent_0 directly 
-    [0] i.e. train_state can be directly equal to train_state_agent_0
+[1] Double check in the all dictionary elements that we can use agent_0 directly 
+    [1] i.e. train_state can be directly equal to train_state_agent_0
     [1] auxilary lost, don't need combined_aux and agent_0 aux is enough
 
 """

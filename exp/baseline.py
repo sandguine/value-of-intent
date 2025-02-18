@@ -112,12 +112,12 @@ class ActorCritic(nn.Module):
             Tuple of (action distribution, value estimate)
         """
         # # Print debug information about input shape
-        print("Network input x shape:", x.shape)
-        print("ActorCritic input shape:", x.shape)
+        # print("Network input x shape:", x.shape)
+        # print("ActorCritic input shape:", x.shape)
         
         # Expected input dimension is the last dimension of the input tensor
         expected_dim = x.shape[-1] if len(x.shape) > 1 else x.shape[0]
-        print(f"Expected input dim: {expected_dim}")
+        # print(f"Expected input dim: {expected_dim}")
 
         # Actor network
         actor = self.actor_dense1(x)
@@ -295,12 +295,12 @@ def save_training_results(save_dir, out, config, prefix=""):
     pickle_out_path = os.path.join(save_dir, f"complete_out.pkl")
     with open(pickle_out_path, 'wb') as f:
         pickle.dump(pickle_safe_out, f)
-    print(f"Saved complete training output in pickle format: {pickle_out_path}")
+    # print(f"Saved complete training output in pickle format: {pickle_out_path}")
 
     # Save the complete output in npz format (for compatibility)
     npz_out_path = os.path.join(save_dir, f"complete_out.npz")
     np.savez(npz_out_path, **pickle_safe_out)
-    print(f"Saved complete training output in npz format: {npz_out_path}")
+    # print(f"Saved complete training output in npz format: {npz_out_path}")
 
     # Collect seed-specific parameters into a single dictionary
     all_seeds_params = {}
@@ -381,7 +381,7 @@ def load_training_results(load_dir, load_type="params"):
     if load_type == "params":
         pickle_path = os.path.join(load_dir, f"params.pkl")
         if os.path.exists(pickle_path):
-            print("Loading params from pickle format...")
+            # print("Loading params from pickle format...")
             with open(pickle_path, 'rb') as f:
                 params = pickle.load(f)
                 # Convert numpy arrays to JAX arrays
@@ -393,7 +393,7 @@ def load_training_results(load_dir, load_type="params"):
     elif load_type == "complete":
         pickle_path = os.path.join(load_dir, f"complete_out.pkl")
         if os.path.exists(pickle_path):
-            print("Loading complete output from pickle format...")
+            # print("Loading complete output from pickle format...")
             with open(pickle_path, 'rb') as f:
                 out = pickle.load(f)
                 # Convert numpy arrays to JAX arrays

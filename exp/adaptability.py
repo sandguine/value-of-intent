@@ -806,6 +806,14 @@ def make_train(config):
                 None, 
                 config["NUM_STEPS"]
             )
+
+            # # Compute per-environment mean reward for the epoch
+            # rewards_per_env = traj_batch.reward.mean(axis=0)  # Shape: (NUM_ENVS,)
+
+            # mean_reward = jnp.mean(rewards_per_env)
+            # std_reward = jnp.std(rewards_per_env)
+            # min_reward = jnp.min(rewards_per_env)
+            # max_reward = jnp.max(rewards_per_env)
             
             # CALCULATE ADVANTAGE
             train_state, env_state, last_obs, update_step, rng = runner_state
@@ -1010,30 +1018,6 @@ def make_train(config):
 
                 return (train_state, traj_batch, advantages, targets, rng), total_loss
 
-            # update_state = (train_state, traj_batch, advantages, targets, rng)
-            # update_state, loss_info = jax.lax.scan(
-            #     lambda state, _: _update_epoch(state, _, config),
-            #     update_state, 
-            #     None, 
-            #     config["UPDATE_EPOCHS"]
-            # )
-
-            # train_state = update_state[0]
-            # metric = info
-            # current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
-            # metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
-            # metric["shaped_reward_annealed"] = metric.get("shaped_reward", 0) * rew_shaping_anneal(current_timestep)
-            # rng = update_state[-1]
-            # def callback(metric):
-            #     wandb.log(
-            #         metric
-            #     )
-            # update_step = update_step + 1
-            # metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
-            # metric["update_step"] = update_step
-            # metric["env_step"] = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
-            # jax.debug.callback(callback, metric)
-            
             # runner_state = (train_state, env_state, last_obs, update_step, rng)
             # return runner_state, metric
             update_state = (train_state, traj_batch, advantages, targets, rng)
@@ -1053,22 +1037,52 @@ def make_train(config):
             # Prevent JAX tracing issue
             update_step = jax.lax.stop_gradient(update_step)
 
-            # Store individual seed metrics
+            # Store metrics
             loggable_metrics = {}
             num_seeds = config["NUM_SEEDS"]
 
-            for seed_idx in range(num_seeds):
-                # Log reward-based metrics
-                loggable_metrics[f"seed_{seed_idx}/shaped_reward"] = float(metric["shaped_reward"]["agent_0"][seed_idx])
-                loggable_metrics[f"seed_{seed_idx}/shaped_reward_annealed"] = float(metric.get("shaped_reward", 0)[seed_idx]) * rew_shaping_anneal(current_timestep)
+            # Compute per-environment mean reward for the epoch
+            rewards_per_env = traj_batch.reward.mean(axis=0)
+            mean_reward = jnp.mean(rewards_per_env)
+            std_reward = jnp.std(rewards_per_env)
+            min_reward = jnp.min(rewards_per_env)
+            max_reward = jnp.max(rewards_per_env)
 
-                # Adaptability metrics
-                loggable_metrics[f"seed_{seed_idx}/policy_entropy"] = float(metric["policy_entropy"][seed_idx])
-                loggable_metrics[f"seed_{seed_idx}/kl_divergence"] = float(metric["kl_divergence"][seed_idx])
-                loggable_metrics[f"seed_{seed_idx}/value_loss"] = float(metric["value_loss"][seed_idx])
-                loggable_metrics[f"seed_{seed_idx}/adaptation_rate"] = float(metric["adaptation_rate"][seed_idx])
-                loggable_metrics[f"seed_{seed_idx}/success_rate"] = float(metric["success_rate"][seed_idx])
-                loggable_metrics[f"seed_{seed_idx}/policy_diversity"] = float(metric["policy_diversity"][seed_idx])
+            # Log reward-based metrics to wandb
+            loggable_metrics["mean_reward"] = float(mean_reward)
+            loggable_metrics["std_reward"] = float(std_reward)
+            loggable_metrics["min_reward"] = float(min_reward)
+            loggable_metrics["max_reward"] = float(max_reward)
+
+            # Assuming metric["shaped_reward"]["agent_0"] shape: (NUM_SEEDS, NUM_ENVS, NUM_STEPS)
+            # Average across steps per environment (partner)
+            # avg_reward_per_env = jnp.mean(metric["shaped_reward"]["agent_0"], axis=-1)  # shape: (NUM_SEEDS, NUM_ENVS)
+
+            # # Compute mean, std, min, max across environments (partners) for each seed
+            # mean_reward_across_envs = jnp.mean(avg_reward_per_env, axis=-1)  # (NUM_SEEDS,)
+            # std_reward_across_envs = jnp.std(avg_reward_per_env, axis=-1)    # (NUM_SEEDS,)
+            # min_reward_across_envs = jnp.min(avg_reward_per_env, axis=-1)    # (NUM_SEEDS,)
+            # max_reward_across_envs = jnp.max(avg_reward_per_env, axis=-1)    # (NUM_SEEDS,)
+
+            # Add per-seed aggregated partner stats to loggable_metrics
+            # for seed_idx in range(num_seeds):
+            #     loggable_metrics[f"seed_{seed_idx}/mean_reward_per_env"] = float(mean_reward_across_envs[seed_idx])
+            #     loggable_metrics[f"seed_{seed_idx}/std_reward_per_env"] = float(std_reward_across_envs[seed_idx])
+            #     loggable_metrics[f"seed_{seed_idx}/min_reward_per_env"] = float(min_reward_across_envs[seed_idx])
+            #     loggable_metrics[f"seed_{seed_idx}/max_reward_per_env"] = float(max_reward_across_envs[seed_idx])
+
+            # for seed_idx in range(num_seeds):
+            #     # Log reward-based metrics
+            #     loggable_metrics[f"seed_{seed_idx}/shaped_reward"] = float(metric["shaped_reward"]["agent_0"][seed_idx])
+            #     loggable_metrics[f"seed_{seed_idx}/shaped_reward_annealed"] = float(metric.get("shaped_reward", 0)[seed_idx]) * rew_shaping_anneal(current_timestep)
+
+            #     # Adaptability metrics
+            #     loggable_metrics[f"seed_{seed_idx}/policy_entropy"] = float(metric["policy_entropy"][seed_idx])
+            #     loggable_metrics[f"seed_{seed_idx}/kl_divergence"] = float(metric["kl_divergence"][seed_idx])
+            #     loggable_metrics[f"seed_{seed_idx}/value_loss"] = float(metric["value_loss"][seed_idx])
+            #     loggable_metrics[f"seed_{seed_idx}/adaptation_rate"] = float(metric["adaptation_rate"][seed_idx])
+            #     loggable_metrics[f"seed_{seed_idx}/success_rate"] = float(metric["success_rate"][seed_idx])
+            #     loggable_metrics[f"seed_{seed_idx}/policy_diversity"] = float(metric["policy_diversity"][seed_idx])
 
             # Log update step and env step separately
             loggable_metrics["update_step"] = int(update_step)

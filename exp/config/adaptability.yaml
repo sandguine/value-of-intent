@@ -2,7 +2,7 @@
 SEED: 30                              # Random seed for reproducibility
 NUM_SEEDS: 10                         # Default for hyperparameter tuning (use 100 for adaptability tests)
 TRAINING_MODE: standard               # Options: adaptability, standard
-LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250211/cramped_room/bl_ff_ippo_oc_default_20250211_190236_30
+LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250218/asymm_advantages/bl_ff_ippo_oc_default_20250218_102219_30
 AGENT_TYPE: "baseline"                # Options: baseline, oracle
 SHARED_POLICY: true                   # Whether to use a shared policy for the agents
 

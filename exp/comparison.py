@@ -2,11 +2,11 @@
 [1] Only need to load the parameters from pre-trained of the partner agent.
 [1] Everytime network.apply is being called is when we need to passed along either trainstate.params or pretrained parameters from fixed partners.
     [1] Basically, just used the load_training_results for network.apply agent_1 to load and sample properly, sample equal to numbers of NUM_ENVS.
-    [1] Pretty sure that in get_rollout, the while not done is to apply to each seed multiple times so we could just used from sampled. <- Double check this
+    [0] Pretty sure that in get_rollout, the while not done is to apply to each seed multiple times so we could just used from sampled. <- Double check this
 [1] Network initialization need to be done only for agent_0.
 [1] Update advantages, train states etc. only on self.
     [1] As for fixed just keep using the fix params no updates.
-    [1] Double check the size of dictionary. We can use agent_0 data directly or wrapped under dict if dimension mismatched.
+    [0] Double check the size of dictionary. We can use agent_0 data directly or wrapped under dict if dimension mismatched.
 [1] There shouldn't be much changed at all to this version except for loading the save params from pre-trained.
 [1] Need to get the save and visualization functions correctly from baseline.
 [0] Need to plot to wandb correctly, either each seed individually or find the right aggregating methods for all seeds.
@@ -14,8 +14,8 @@
         [0] This could also reveal characteristics of the partner policy or self that make it s.t. total reward is higher.
         [0] This might reveal info behaviorally that may have been previously neglected.
 [1] Maybe look and compare to the oracle_shared as well on the batchify and unbatchify. -> handle this a bit differently through _env_step instead
-[1] Double check in the all dictionary elements that we can use agent_0 directly 
-    [1] i.e. train_state can be directly equal to train_state_agent_0
+[0] Double check in the all dictionary elements that we can use agent_0 directly 
+    [0] i.e. train_state can be directly equal to train_state_agent_0
     [1] auxilary lost, don't need combined_aux and agent_0 aux is enough
 
 """
@@ -184,10 +184,9 @@ def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=
         agent_1_params: Pretrained parameters for partner agent
         is_shared_params: Boolean flag for shared vs. separate parameters
         config: Dictionary containing environment and training configuration
-        save_dir: Optional directory to save rollout plots.
         
     Returns:
-        Dictionary containing episode trajectory data including states, rewards, and shaped rewards.
+        Episode trajectory data including states, rewards, and shaped rewards
     """
     if "DIMS" not in config:
         raise ValueError("Config is missing DIMS dictionary. Check that dimensions were properly initialized in main()")
@@ -230,20 +229,20 @@ def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=
     while not done:
         key, key_a0, key_a1, key_s = jax.random.split(key, 4)
 
-        # Ensure agent_1 receives the correct observations
-        agent_1_obs = obs["agent_1"].reshape(-1)
+        # Process partner agent (Baseline, no augmentation)
+        agent_1_obs = obs["agent_1"].flatten()
 
         if is_shared_params:
-            pi_1, _ = network.apply(train_state.params, agent_1_obs)  # Use shared params
+            pi_1, _ = network.apply(agent_1_params, agent_1_obs)
         else:
             pi_1, _ = network.apply(agent_1_params, agent_1_obs)
-
+        
         action_1 = pi_1.sample(seed=key_a1)
 
-        # Ensure agent_0 receives correctly formatted observations
-        agent_0_obs = obs["agent_0"].reshape(-1)
+        # Process learning agent (Oracle: Augmented, Baseline: Raw)
+        agent_0_obs = obs["agent_0"].flatten()
 
-        if config.get("AUGMENT_OBS", False):  # Match augmentation logic in training
+        if config["AGENT_TYPE"] == "oracle":
             one_hot_action = jax.nn.one_hot(action_1, env.action_space().n)
             agent_0_obs = jnp.concatenate([agent_0_obs, one_hot_action])
 
@@ -256,14 +255,16 @@ def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=
         }
 
         obs, state, reward, done, info = env.step(key_s, state, actions)
-        done = done["agent_0"]  # Ensure we track `agent_0`'s termination condition
+        done = done["__all__"]
 
         rewards.append(reward['agent_0'])
         shaped_rewards.append(info["shaped_reward"]['agent_0'])
 
         state_seq.append(state)
 
-    # Save reward plot if directory is provided
+    # Plot rewards
+    import matplotlib.pyplot as plt
+
     plt.plot(rewards, label="reward")
     plt.plot(shaped_rewards, label="shaped_reward")
     plt.legend()
@@ -271,12 +272,7 @@ def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=
         plt.savefig(os.path.join(save_dir, "reward_plot.png"))
     plt.close()
 
-    # Return rollout data for further analysis
-    return {
-        "state_seq": state_seq,
-        "rewards": rewards,
-        "shaped_rewards": shaped_rewards
-    }
+    return state_seq
 
 def batchify(x: dict, agent_list, num_actors):
     """Converts individual agent observations into a batched tensor."""
@@ -448,7 +444,7 @@ def save_training_results(save_dir, out, config, prefix=""):
         print(f"Saved all seed-specific parameters in pickle format: {pickle_seeds_path}")
         
         # Then save as npz for compatibility
-        npz_seeds_path = os.path.join(save_dir, f"all_seeds_params.npz")
+        npz_seeds_path = os.path.join(save_dir, f"{prefix}all_seeds_params.npz")
         np.savez(npz_seeds_path, **all_seeds_params)
         print(f"Saved all seed-specific parameters in npz format: {npz_seeds_path}")
     else:
@@ -469,7 +465,7 @@ def load_training_results(load_dir, load_type="params", config=None):
     key, subkey = jax.random.split(key)
 
     if load_type == "params":
-        pickle_path = os.path.join(load_dir, f"all_seeds_params.pkl")
+        pickle_path = os.path.join(load_dir, f"params.pkl")
         if os.path.exists(pickle_path):
             print("Loading params from pickle format...")
             with open(pickle_path, 'rb') as f:
@@ -490,7 +486,6 @@ def load_training_results(load_dir, load_type="params", config=None):
             # Reshape for easier access if needed
             # sampled_params_reshaped = jax.tree_util.tree_map(lambda x: x.squeeze(axis=1), sampled_params)
             # print("shape of sampled_params_reshaped:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params_reshaped))
-            # Sampling individual seeds
             # seed_idx = jax.random.randint(subkey, shape=(), minval=0, maxval=num_seeds)
             # sampled_params = jax.tree_util.tree_map(lambda x: x[seed_idx], all_params)
             # print("shape ofsampled_params before freeze:", sampled_params.shape)
@@ -500,6 +495,7 @@ def load_training_results(load_dir, load_type="params", config=None):
             print("Successfully loaded pretrained model.")
             print("Loaded params type:", type(sampled_params))  # Should be <FrozenDict>
             print("Keys in params:", sampled_params.keys())
+            # print("Shape of sampled_params:", jax.tree_map(lambda x: x.shape, sampled_params))
             
             return sampled_params
                 
@@ -586,6 +582,10 @@ def make_train(config):
     assert np.prod(env.observation_space().shape) == dims["base_obs_dim"], "Observation dimension mismatch"
     assert env.action_space().n == dims["action_dim"], "Action dimension mismatch"
 
+    # Load pretrained parameters once at this level
+    pretrained_params = load_training_results(config["LOAD_PATH"], load_type="params", config=config)
+    print("shape of pretrained_params:", jax.tree_util.tree_map(lambda x: x.shape, pretrained_params))
+
     # Calculate key training parameters
     config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
     config["NUM_UPDATES"] = (
@@ -631,7 +631,7 @@ def make_train(config):
         transition_steps=config["REW_SHAPING_HORIZON"]
     )
 
-    def train(rng, pretrained_params):
+    def train(rng):
         """Main training loop for Independent PPO (IPPO) algorithm.
         
         Implements the core training loop for training multiple agents using IPPO.
@@ -721,109 +721,143 @@ def make_train(config):
         obsv, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
         
         # TRAIN LOOP
-        def _update_step(runner_state, unused, pretrained_params):
-            """
-            Executes a full update step, including trajectory collection, advantage computation,
-            and policy updates.
+        def _update_step(runner_state, unused):
+            """Executes a single training update step in the IPPO algorithm.
+            
+            This function performs one complete update iteration including:
+            1. Collecting trajectories by running the current policy in the environment
+            2. Computing advantages and returns
+            3. Updating both agents' neural networks using PPO
+            
+            The update handles both agents (agent_0 and agent_1) separately, with agent_0
+            receiving augmented observations that include agent_1's actions.
             
             Args:
-                runner_state: Tuple containing (train_state, env_state, last_obs, update_step, rng)
-                unused: Placeholder for `jax.lax.scan`
-                config: Configuration dictionary
-            
+                runner_state: Tuple containing:
+                    - train_state: Current training state with network parameters
+                    - env_state: Current environment state
+                    - last_obs: Previous observations from environment
+                    - update_step: Current training iteration number
+                    - rng: Random number generator state
+                unused: Placeholder parameter for JAX scan compatibility
+                
             Returns:
-                Updated runner state and metric dictionary.
+                Tuple containing:
+                    - Updated runner_state
+                    - Metrics dictionary with training statistics
             """
             # COLLECT TRAJECTORIES
-            def _env_step(runner_state, unused, pretrained_params):
-                """
-                Executes a single environment step while ensuring each agent_0 is paired
-                with the correct pretrained agent_1 policy.
-
-                Args:
-                    runner_state: (train_state, env_state, last_obs, update_step, rng)
-                    unused: Required for jax.lax.scan, not used.
-                    pretrained_params: The pretrained parameters for agent_1.
-
-                Returns:
-                    Updated runner_state and transition information.
-                """
+            def _env_step(runner_state, unused, dims, pretrained_params): 
+                # nik suggestion:need to use jax.vmap to process each environment in parallel
                 train_state, env_state, last_obs, update_step, rng = runner_state
-                rng, rng_action_1, rng_action_0, rng_step = jax.random.split(rng, 4)
+                rng, step_rng = jax.random.split(rng)
 
-                # Extract correct agent_1 parameters per environment
-                num_envs = last_obs['agent_1'].shape[0]  # Should be 16
+                # Separate observations by environment
+                batch_size = last_obs['agent_0'].shape[0]  # Should equal NUM_ENVS
+                print(f"batch_size: {batch_size}")
+                
+                # Process each environment with its fixed partner
+                def process_single_env(env_idx, obs_and_rng):
+                    obs, env_rng = obs_and_rng
 
-                def apply_agent_1(env_idx):
-                    """
-                    Applies the pretrained agent_1 policy for a specific environment index.
-                    This ensures that each agent_1 gets its corresponding parameters.
-                    """
-                    agent_1_obs = last_obs['agent_1'][env_idx].reshape(-1)  # Shape: (520,)
-                    agent_1_pi, _ = network.apply(
-                        jax.tree_util.tree_map(lambda x: x[env_idx], pretrained_params),  # Extract per-env params
-                        agent_1_obs
+                    # Process partner agent (Baseline, fixed)
+                    partner_obs = obs['agent_1']
+                    print("partner_obs.shape BEFORE vmap:", partner_obs.shape)
+                    partner_obs = partner_obs.transpose(1, 0, 2).reshape(-1, 520)  # Ensure correct batching
+                    print("partner_obs.shape BEFORE vmap:", partner_obs.shape)  # Should be (NUM_ENVS, 520)
+
+                    pi_partner, _ = jax.vmap(network.apply, in_axes=(None, 0))(
+                        pretrained_params, 
+                        partner_obs
                     )
-                    return agent_1_pi.sample(seed=rng_action_1)
+                    print("pi_partner.shape AFTER vmap:", pi_partner.batch_shape)  # Should be (NUM_ENVS,)
 
-                # Vectorized application across all environments
-                agent_1_action = jax.vmap(apply_agent_1)(jnp.arange(num_envs))  # Shape: (16,)
+                    partner_action = pi_partner.sample(seed=env_rng)
 
-                # Agent 0: Augment its observation
-                agent_0_obs = last_obs['agent_0'].reshape(num_envs, -1)  # Shape: (16, 520)
-                one_hot_action = jax.nn.one_hot(agent_1_action, env.action_space().n)  # Shape: (16, 6)
-                agent_0_obs_augmented = jnp.concatenate([agent_0_obs, one_hot_action], axis=-1)  # Shape: (16, 526)
+                    # Process learning agent (Oracle)
+                    agent_obs = obs['agent_0'].reshape(-1)  # Flatten to (NUM_ENVS, base_obs_dim)
+                    partner_action_onehot = jax.nn.one_hot(partner_action, dims["action_dim"])
+                    agent_obs_aug = jnp.concatenate([agent_obs, partner_action_onehot], axis=-1)
 
-                # Apply agent_0 policy using trainable parameters
-                agent_0_pi, agent_0_value = network.apply(train_state.params, agent_0_obs_augmented)
-                agent_0_action = agent_0_pi.sample(seed=rng_action_0)
-                agent_0_log_prob = agent_0_pi.log_prob(agent_0_action)
+                    pi_agent, value_agent = network.apply(train_state.params, agent_obs_aug)
+                    agent_action = pi_agent.sample(seed=env_rng)
 
-                # Step the environment
-                actions = {"agent_0": agent_0_action, "agent_1": agent_1_action}
-                next_obs, next_env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0))(
-                    jax.random.split(rng_step, num_envs),
-                    env_state,
-                    actions,
+                    return {
+                        'agent_0': {
+                            'action': agent_action,
+                            'value': value_agent,
+                            'log_prob': pi_agent.log_prob(agent_action),
+                            'obs_aug': agent_obs_aug
+                        },
+                        'agent_1': {
+                            'action': partner_action
+                        }
+                    }
+
+                # Generate per-environment RNGs
+                env_rngs = jax.random.split(step_rng, batch_size)
+                
+                # Process all environments in parallel
+                env_outputs = jax.vmap(process_single_env)(
+                    jnp.arange(batch_size),
+                    (last_obs, env_rngs)
                 )
 
-                # Create transition
+                # Collect actions for environment step
+                actions = {
+                    'agent_0': env_outputs['agent_0']['action'],
+                    'agent_1': env_outputs['agent_1']['action']
+                }
+
+                # Debug action shapes before stepping environment
+                print("Actions shape before env.step() - agent_0:", actions["agent_0"].shape)
+                print("Actions shape before env.step() - agent_1:", actions["agent_1"].shape)
+
+                # Step environments
+                next_obs, next_state, rewards, dones, infos = jax.vmap(env.step)(
+                    jax.random.split(rng, batch_size), 
+                    env_state, 
+                    actions
+                )
+
+                # Create transition for learning agent only
                 transition = Transition(
-                    done=done["agent_0"],
-                    action=agent_0_action,
-                    value=agent_0_value,
-                    reward=reward["agent_0"],
-                    log_prob=agent_0_log_prob,
-                    obs=agent_0_obs_augmented,
+                    done=dones['agent_0'],
+                    action=env_outputs['agent_0']['action'],
+                    value=env_outputs['agent_0']['value'],
+                    reward=rewards['agent_0'],
+                    log_prob=env_outputs['agent_0']['log_prob'],
+                    obs=env_outputs['agent_0']['obs_aug']
                 )
 
-                runner_state = (train_state, next_env_state, next_obs, update_step, rng)
-                return runner_state, (transition, info)
+                # Debug expected shapes before validation
+                print(f"Expected NUM_ENVS: {config['NUM_ENVS']}")
+                print(f"pretrained_params length: {len(pretrained_params)}")  # Should be NUM_ENVS
+                print(f"transitions.obs shape: {transition.obs.shape}")  # Should be (NUM_ENVS, augmented_obs_dim)
 
-            runner_state, (traj_batch, info) = jax.lax.scan(
-                lambda state, unused: _env_step(state, unused, pretrained_params),  
-                runner_state, 
-                None, 
-                config["NUM_STEPS"]
+                # Verify that the batching is correct
+                validation_passed = validate_batching(pretrained_params, transition, config)
+                if not validation_passed:
+                    raise ValueError("Batching validation failed!")
+
+                runner_state = (train_state, next_state, next_obs, update_step, rng)
+                return runner_state, (transition, infos)
+
+
+            runner_state, (traj_batch, info, processed_obs) = jax.lax.scan(
+                partial(_env_step, dims=dims, pretrained_params=pretrained_params), 
+                runner_state, None, config["NUM_STEPS"]
             )
-
-            # # Compute per-environment mean reward for the epoch
-            # rewards_per_env = traj_batch.reward.mean(axis=0)  # Shape: (NUM_ENVS,)
-
-            # mean_reward = jnp.mean(rewards_per_env)
-            # std_reward = jnp.std(rewards_per_env)
-            # min_reward = jnp.min(rewards_per_env)
-            # max_reward = jnp.max(rewards_per_env)
             
             # CALCULATE ADVANTAGE
             train_state, env_state, last_obs, update_step, rng = runner_state
             
             # Calculate last values for agent_0
             # For agent_0, need to include agent_1's last action in observation
-            one_hot_last_action = jax.nn.one_hot(traj_batch.action[-1], env.action_space().n)
+            one_hot_last_action = jax.nn.one_hot(traj_batch.action[-1, 1], env.action_space().n)
             last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1)
             last_obs_agent0_augmented = jnp.concatenate([last_obs_agent0, one_hot_last_action], axis=-1)
-            _, agent_0_last_val = network.apply(train_state.params, last_obs_agent0_augmented)
+            _, agent_0_last_val = network.apply(train_state['agent_0'].params, last_obs_agent0_augmented)
             print("agent_0_last_val shape:", agent_0_last_val.shape)
 
             # Combine values for advantage calculation
@@ -831,14 +865,42 @@ def make_train(config):
 
             # calculate_gae itself didn't need to be changed because we can use the same advantage function for both agents
             def _calculate_gae(traj_batch, last_val):
+                """Calculate Generalized Advantage Estimation (GAE) for trajectories.
+                
+                This function computes the GAE for a given trajectory batch and last value,
+                which are used to estimate the advantage of each action in the trajectory.
+
+                Args:
+                    traj_batch: Trajectory batch containing transitions
+                    last_val: Last value estimates for the trajectory
+                    
+                Returns:
+                    Tuple containing:
+                        - Advantages for the trajectory
+                        - Returns (advantages + value estimates)
+                """
                 print(f"\nGAE Calculation Debug:")
-                print("traj_batch types:", jax.tree_util.tree_map(lambda x: x.dtype, traj_batch))
-                print(f"traj_batch shapes:", jax.tree_util.tree_map(lambda x: x.shape, traj_batch))
-                print("last_val types:", jax.tree_util.tree_map(lambda x: x.dtype, last_val))
+                print("traj_batch types:", jax.tree_map(lambda x: x.dtype, traj_batch))
+                print(f"traj_batch shapes:", jax.tree_map(lambda x: x.shape, traj_batch))
+                print("last_val types:", jax.tree_map(lambda x: x.dtype, last_val))
                 print(f"last_val shape: {last_val.shape}")
                 
 
                 def _get_advantages(gae_and_next_value, transition):
+                    """Calculate GAE and returns for a single transition.
+                    
+                    This function computes the GAE and returns for a single transition,
+                    which are used to update the policy and value functions.
+                    
+                    Args:
+                        gae_and_next_value: Tuple containing current GAE and next value
+                        transition: Single transition containing data for one step
+                    
+                    Returns:
+                        Tuple containing:
+                            - Updated GAE and next value
+                            - Calculated GAE
+                    """
                     gae, next_value = gae_and_next_value
                     
                     done, value, reward = (
@@ -881,27 +943,117 @@ def make_train(config):
             print("targets shape:", targets.shape)
             print("traj_batch value shape:", traj_batch.value.shape)
             print("traj_batch reward shape:", traj_batch.reward.shape)
-            print("traj_batch data types:", jax.tree_util.tree_map(lambda x: x.dtype, traj_batch))
+            print("traj_batch data types:", jax.tree_map(lambda x: x.dtype, traj_batch))
 
             # UPDATE NETWORK
-            def _update_epoch(update_state, unused, config):
-                def _update_minbatch(train_state, batch_info, config):
+            def _update_epoch(update_state, unused):
+                """
+                Performs a complete training epoch for both agents.
+                
+                Args:
+                    update_state: Tuple containing (train_state, traj_batch, advantages, targets, rng)
+                    unused: Placeholder for scan compatibility
+                    
+                Returns:
+                    Updated state and loss information
+                """
+                def _update_minbatch(train_state, batch_info):
+                    """Updates network parameters using a minibatch of experience.
+                    
+                    Args:
+                        train_state: Current training state containing both agents' parameters
+                        batch_info: Tuple of (traj_batch, advantages, targets) for both agents
+                        
+                    Returns:
+                        Updated training state and loss information
+                    """
                     print("\nStarting minibatch update...")
                     # Unpack batch_info which now contains separate agent data
-                    agent_0_data = batch_info['agent_0']
+                    agent_0_data, agent_1_data = batch_info['agent_0'], batch_info['agent_1']
                     
                     print("Minibatch shapes:")
-                    print("Agent 0 data:", jax.tree_util.tree_map(lambda x: x.shape, agent_0_data))
+                    print("Agent 0 data:", jax.tree_map(lambda x: x.shape, agent_0_data))
+                    print("Agent 1 data:", jax.tree_map(lambda x: x.shape, agent_1_data))
 
-                    traj_batch = agent_0_data['traj']
-                    advantages = agent_0_data['advantages']
-                    targets = agent_0_data['targets']
 
-                    def _loss_fn(params, traj_batch, gae, targets, config):
+                    # Loss function itself didn't need to be changed because we can use the same loss function for both agents
+                    # def _loss_fn(params, traj_batch, gae, targets, agent_type):
+                    #     """Calculate loss for a single agent.
+                        
+                    #     This function computes the loss for a single agent, which is used
+                    #     to update the policy and value functions.
+                        
+                    #     Args:
+                    #         params: Network parameters for the agent
+                    #         traj_batch: Trajectory batch containing transitions
+                    #         gae: Generalized Advantage Estimation (GAE) for the trajectory
+                    #         targets: Target values (advantages + value estimates) for the trajectory
+                        
+                    #     Returns:
+                    #         Tuple containing:
+                    #             - Total loss for the agent
+                    #             - Auxiliary loss information (value loss, actor loss, entropy)
+                    #     """
+                    #     # RERUN NETWORK
+                    #     print(f"\nCalculating losses for {agent_type}...")
+                    #     print(f"Input obs shape: {traj_batch.obs.shape}")
+                    #     pi, value = network.apply(params, traj_batch.obs)
+                    #     print(f"Network outputs - pi shape: {pi.batch_shape}, value shape: {value.shape}")
+                    #     log_prob = pi.log_prob(traj_batch.action)
+                    #     print(f"Log prob shape: {log_prob.shape}")
+
+                    #     # CALCULATE VALUE LOSS
+                    #     value_pred_clipped = traj_batch.value + (
+                    #         value - traj_batch.value
+                    #     ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
+                    #     value_losses = jnp.square(value - targets)
+                    #     value_losses_clipped = jnp.square(value_pred_clipped - targets)
+                    #     value_loss = (
+                    #         0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+                    #     )
+
+                    #     # CALCULATE ACTOR LOSS
+                    #     ratio = jnp.exp(log_prob - traj_batch.log_prob)
+                    #     print(f"Importance ratio shape: {ratio.shape}")
+                    #     gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                    #     print(f"Normalized GAE shape: {gae.shape}")
+                    #     loss_actor1 = ratio * gae
+                    #     loss_actor2 = (
+                    #         jnp.clip(
+                    #             ratio,
+                    #             1.0 - config["CLIP_EPS"],
+                    #             1.0 + config["CLIP_EPS"],
+                    #         )
+                    #         * gae
+                    #     )
+                    #     loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
+                    #     loss_actor = loss_actor.mean()
+                    #     entropy = pi.entropy().mean()
+
+                    #     total_loss = (
+                    #         loss_actor
+                    #         + config["VF_COEF"] * value_loss
+                    #         - config["ENT_COEF"] * entropy
+                    #     )
+                    #     loss_info = {
+                    #         'value_loss': value_loss,
+                    #         'actor_loss': loss_actor,
+                    #         'entropy': entropy,
+                    #         'total_loss': total_loss,
+                    #         'grad_norm': None  # Will be filled later
+                    #     }
+                        
+                    #     print(f"\nLoss breakdown for {agent_type}:")
+                    #     for k, v in loss_info.items():
+                    #         if v is not None:
+                    #             print(f"{k}: {v}")
+                        
+                    #     return total_loss, loss_info
+                    def _loss_fn(params, traj_batch, gae, targets):
                         """Calculate loss for agent_0."""
                         pi, value = network.apply(params, traj_batch.obs)
                         log_prob = pi.log_prob(traj_batch.action)
-
+                        
                         # Value loss calculation
                         value_pred_clipped = traj_batch.value + (
                             value - traj_batch.value
@@ -909,7 +1061,7 @@ def make_train(config):
                         value_losses = jnp.square(value - targets)
                         value_losses_clipped = jnp.square(value_pred_clipped - targets)
                         value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
-
+                        
                         # Actor loss calculation
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
                         gae = (gae - gae.mean()) / (gae.std() + 1e-8)
@@ -917,15 +1069,15 @@ def make_train(config):
                             ratio * gae,
                             jnp.clip(ratio, 1.0 - config["CLIP_EPS"], 1.0 + config["CLIP_EPS"]) * gae
                         ).mean()
-
+                        
                         entropy = pi.entropy().mean()
-
+                        
                         total_loss = (
                             loss_actor
                             + config["VF_COEF"] * value_loss
                             - config["ENT_COEF"] * entropy
                         )
-
+                        
                         return total_loss, {
                             'value_loss': value_loss,
                             'actor_loss': loss_actor,
@@ -933,18 +1085,29 @@ def make_train(config):
                             'total_loss': total_loss
                         }
 
+                    # Create separate loss functions for each agent, and only keep the agent_0 since we don't need agent_1
+                    loss_fn_agent_0 = partial(_loss_fn, agent_type='agent_0')
+                    # loss_fn_agent_1 = partial(_loss_fn, agent_type='agent_1')
+
+                    # Create gradient function, same as before
+                    grad_fn_0 = jax.value_and_grad(loss_fn_agent_0, has_aux=True)
+                    # grad_fn_1 = jax.value_and_grad(loss_fn_agent_1, has_aux=True)
+    
                     # Compute gradients for agent 0
-                    grad_fn_0 = jax.value_and_grad(lambda p: _loss_fn(p, traj_batch, advantages, targets, config), has_aux=True)
-                    (loss_0, aux_0), grads_0 = grad_fn_0(train_state.params)
+                    (loss_0, aux_0), grads_0 = grad_fn_0(
+                        train_state.params,
+                        traj_batch,
+                        advantages,
+                        targets
+                    )
 
-                    # Compute gradient norms correctly
-                    grad_norm_0 = optax.global_norm(grads_0)
-                    print(f"\nGradient stats:")
-                    print(f"Grad norm agent_0: {grad_norm_0}")
-
+                    print("\nGradient stats:")
+                    print(f"Grad norm agent_0: {optax.global_norm(grads_0)}")
+                    # print(f"Grad norm agent_1: {optax.global_norm(grads_1)}")
+                    
                     # Update only agent_0
                     train_state = train_state.apply_gradients(grads=grads_0)
-
+                    
                     return train_state, (loss_0, aux_0)
 
                 train_state, traj_batch, advantages, targets, rng = update_state
@@ -952,108 +1115,153 @@ def make_train(config):
 
                 # Calculate total batch size and minibatch size
                 batch_size = config["NUM_STEPS"] * config["NUM_ENVS"]
-                minibatch_size = batch_size // config["NUM_MINIBATCHES"]
+                config["MINIBATCH_SIZE"] = batch_size // config["NUM_MINIBATCHES"]
 
-                # Ensure batch size is evenly divisible
-                assert batch_size % config["NUM_MINIBATCHES"] == 0, "Steps * Envs must be divisible by number of minibatches"
+                # Verify that the data can be evenly split into minibatches
+                assert (
+                    batch_size % config["NUM_MINIBATCHES"] == 0
+                ), "Steps * Envs must be divisible by number of minibatches"               # Shape: (128, 16)
+
+                #print("\nBatch processing, Pre-reshape diagnostics:")
+                #print("agent_0 obs structure:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), agent_data['agent_0']['traj'].obs))
+                #print("agent_1 obs structure:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), agent_data['agent_1']['traj'].obs))
+                #print("Advantages shape:", advantages.shape)
+                #print("Targets shape:", targets.shape)
 
                 # Reshape function that handles the different observation sizes
                 def reshape_agent_data(agent_dict):
-
+                    """Reshape trajectory data for a single agent.
+                    
+                    This function reshapes the trajectory data for a single agent,
+                    ensuring that the observations are reshaped correctly while keeping
+                    the features dimension intact.
+                    
+                    Args:
+                        agent_dict: Dictionary containing trajectory data for an agent
+                    
+                    Returns:
+                        Dictionary containing reshaped trajectory data
+                    """
                     def reshape_field(x, field_name):
+                        """Reshape a single field of the trajectory data.
+                        
+                        This function reshapes a single field of the trajectory data,
+                        ensuring that the observations are reshaped correctly while keeping
+                        the features dimension intact.
+
+                        Args:
+                            x: Data to be reshaped
+                            field_name: Name of the field to be reshaped
+                        
+                        Returns:
+                            Reshaped data
+                        """
                         if not isinstance(x, (dict, jnp.ndarray)):
                             return x
-                        return x.reshape(batch_size, -1) if field_name == 'obs' else x.reshape(batch_size)
-
+                            
+                        if field_name == 'obs':
+                            # Keep the features dimension intact, only combine timesteps and envs
+                            #print(f"Reshaping {field_name} from {x.shape} to {(batch_size, -1)}")
+                            return x.reshape(batch_size, -1)
+                        else:
+                            # For other fields, flatten to (batch_size,)
+                            #print(f"Reshaping {field_name} from {x.shape} to {(batch_size,)}")
+                            return x.reshape(batch_size)
+                            
                     return {
-                        'traj': Transition(**{
-                            field: reshape_field(getattr(agent_dict['traj'], field), field)
-                            for field in agent_dict['traj']._fields
-                        }),
+                        'traj': Transition(
+                            **{field: reshape_field(getattr(agent_dict['traj'], field), field)
+                               for field in agent_dict['traj']._fields}
+                        ),
                         'advantages': agent_dict['advantages'].reshape(batch_size),
                         'targets': agent_dict['targets'].reshape(batch_size)
                     }
 
-                # Reshape trajectory data
+                # Reshape each agent's data
                 agent_data = {
-                    "agent_0": {"traj": traj_batch, "advantages": advantages, "targets": targets}
+                    agent: reshape_agent_data(data)
+                    for agent, data in agent_data.items()
                 }
-                agent_data = {agent: reshape_agent_data(data) for agent, data in agent_data.items()}
 
-                # Shuffle data
+                # After reshaping:
+                print("\nPost-reshape diagnostics:")
+                print("Reshaped agent_0 obs:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), agent_data['agent_0']['traj'].obs))
+                # print("Reshaped agent_1 obs:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), agent_data['agent_1']['traj'].obs))
+
+                # Create permutation and shuffle
                 permutation = jax.random.permutation(_rng, batch_size)
                 agent_data = {
                     agent: {
-                        'traj': Transition(**{
-                            field: jnp.take(getattr(data['traj'], field), permutation, axis=0)
-                            for field in data['traj']._fields
-                        }),
+                        'traj': Transition(
+                            **{field: jnp.take(getattr(data['traj'], field), permutation, axis=0)
+                               for field in data['traj']._fields}
+                        ),
                         'advantages': jnp.take(data['advantages'], permutation, axis=0),
                         'targets': jnp.take(data['targets'], permutation, axis=0)
                     }
                     for agent, data in agent_data.items()
                 }
 
-                # Minibatch function
-                def create_minibatches(data):
-                    return {
-                        'traj': Transition(**{
-                            field: getattr(data["traj"], field).reshape((config["NUM_MINIBATCHES"], -1) + getattr(data["traj"], field).shape[1:])
-                            for field in data["traj"]._fields  # ✅ Use data["traj"]
-                        }),
-                        'advantages': data["advantages"].reshape((config["NUM_MINIBATCHES"], -1)),
-                        'targets': data["targets"].reshape((config["NUM_MINIBATCHES"], -1))
-                    }
+                print("\nShuffled batch structure:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), agent_data))
 
                 # Create minibatches
-                minibatches = {agent: create_minibatches(data) for agent, data in agent_data.items()}
-                assert advantages.shape[0] % config["NUM_MINIBATCHES"] == 0, "Minibatch size is incorrect!"
+                def create_minibatches(data):
+                    """Create minibatches from trajectory data.
+                    
+                    This function divides the trajectory data into smaller minibatches,
+                    which are used for training the policy and value networks.
+                    
+                    Args:
+                        data: Dictionary containing trajectory data for an agent
+                    
+                    Returns:
+                        Dictionary containing minibatched trajectory data
+                    """
+                    return {
+                        'traj': Transition(
+                            **{field: jnp.reshape(getattr(data['traj'], field), 
+                                                [config["NUM_MINIBATCHES"], -1] + list(getattr(data['traj'], field).shape[1:]))
+                               for field in data['traj']._fields}
+                        ),
+                        'advantages': data['advantages'].reshape(config["NUM_MINIBATCHES"], -1),
+                        'targets': data['targets'].reshape(config["NUM_MINIBATCHES"], -1)
+                    }
 
-                # Perform minibatch updates
+                minibatches = {
+                    agent: create_minibatches(data)
+                    for agent, data in agent_data.items()
+                }
+
+                print("\nMinibatches structure:", jax.tree_map(lambda x: x.shape if hasattr(x, 'shape') else type(x), minibatches))
+
+                # Update networks using minibatches
                 train_state, total_loss = jax.lax.scan(
-                    lambda state, data: _update_minbatch(state, data, config),  
-                    train_state, 
-                    minibatches
+                    _update_minbatch, train_state, minibatches
                 )
 
-                return (train_state, traj_batch, advantages, targets, rng), total_loss
+                update_state = (train_state, traj_batch, advantages, targets, rng)
+                return update_state, total_loss
 
-            # runner_state = (train_state, env_state, last_obs, update_step, rng)
-            # return runner_state, metric
             update_state = (train_state, traj_batch, advantages, targets, rng)
             update_state, loss_info = jax.lax.scan(
-                lambda state, _: _update_epoch(state, _, config),
-                update_state,
-                None,
-                config["UPDATE_EPOCHS"]
+                _update_epoch, update_state, None, config["UPDATE_EPOCHS"]
             )
-
             train_state = update_state[0]
-
-            # Extract training metrics
             metric = info
-            current_timestep = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+            current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
             metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
             metric["shaped_reward_annealed"] = metric["shaped_reward"]*rew_shaping_anneal(current_timestep)
             
-            rewards_per_env = traj_batch.reward.mean(axis=0)
-            mean_reward = jnp.mean(rewards_per_env)
-            std_reward = jnp.std(rewards_per_env)
-            min_reward = jnp.min(rewards_per_env)
-            max_reward = jnp.max(rewards_per_env)
-
-            metric["mean_reward"] = float(mean_reward)
-            metric["std_reward"] = float(std_reward)
-            metric["min_reward"] = float(min_reward)
-            metric["max_reward"] = float(max_reward)
-
             rng = update_state[-1]
 
             def callback(metric):
                 """Log training metrics to wandb.
                 
                 This function logs the training metrics to wandb, which are used for
-                monitoring and analysis during training.    
+                monitoring and analysis during training.
+
+                Args:
+                    metric: Training metrics to be logged
                 """
                 wandb.log(
                     metric
@@ -1063,85 +1271,16 @@ def make_train(config):
             metric["update_step"] = update_step
             metric["env_step"] = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
             jax.debug.callback(callback, metric)
-
-
-            # Prevent JAX tracing issue
-            # update_step = jax.lax.stop_gradient(update_step)
-
-            # Store metrics
-            # loggable_metrics = {}
-            # num_seeds = config["NUM_SEEDS"]
-
-            # # Compute per-environment mean reward for the epoch
-            # rewards_per_env = traj_batch.reward.mean(axis=0)
-            # mean_reward = jnp.mean(rewards_per_env)
-            # std_reward = jnp.std(rewards_per_env)
-            # min_reward = jnp.min(rewards_per_env)
-            # max_reward = jnp.max(rewards_per_env)
-
-            # # Log reward-based metrics to wandb
-            # loggable_metrics["mean_reward"] = float(mean_reward)
-            # loggable_metrics["std_reward"] = float(std_reward)
-            # loggable_metrics["min_reward"] = float(min_reward)
-            # loggable_metrics["max_reward"] = float(max_reward)
-
-            # Assuming metric["shaped_reward"]["agent_0"] shape: (NUM_SEEDS, NUM_ENVS, NUM_STEPS)
-            # Average across steps per environment (partner)
-            # avg_reward_per_env = jnp.mean(metric["shaped_reward"]["agent_0"], axis=-1)  # shape: (NUM_SEEDS, NUM_ENVS)
-
-            # # Compute mean, std, min, max across environments (partners) for each seed
-            # mean_reward_across_envs = jnp.mean(avg_reward_per_env, axis=-1)  # (NUM_SEEDS,)
-            # std_reward_across_envs = jnp.std(avg_reward_per_env, axis=-1)    # (NUM_SEEDS,)
-            # min_reward_across_envs = jnp.min(avg_reward_per_env, axis=-1)    # (NUM_SEEDS,)
-            # max_reward_across_envs = jnp.max(avg_reward_per_env, axis=-1)    # (NUM_SEEDS,)
-
-            # Add per-seed aggregated partner stats to loggable_metrics
-            # for seed_idx in range(num_seeds):
-            #     loggable_metrics[f"seed_{seed_idx}/mean_reward_per_env"] = float(mean_reward_across_envs[seed_idx])
-            #     loggable_metrics[f"seed_{seed_idx}/std_reward_per_env"] = float(std_reward_across_envs[seed_idx])
-            #     loggable_metrics[f"seed_{seed_idx}/min_reward_per_env"] = float(min_reward_across_envs[seed_idx])
-            #     loggable_metrics[f"seed_{seed_idx}/max_reward_per_env"] = float(max_reward_across_envs[seed_idx])
-
-            # for seed_idx in range(num_seeds):
-            #     # Log reward-based metrics
-            #     loggable_metrics[f"seed_{seed_idx}/shaped_reward"] = float(metric["shaped_reward"]["agent_0"][seed_idx])
-            #     loggable_metrics[f"seed_{seed_idx}/shaped_reward_annealed"] = float(metric.get("shaped_reward", 0)[seed_idx]) * rew_shaping_anneal(current_timestep)
-
-            #     # Adaptability metrics
-            #     loggable_metrics[f"seed_{seed_idx}/policy_entropy"] = float(metric["policy_entropy"][seed_idx])
-            #     loggable_metrics[f"seed_{seed_idx}/kl_divergence"] = float(metric["kl_divergence"][seed_idx])
-            #     loggable_metrics[f"seed_{seed_idx}/value_loss"] = float(metric["value_loss"][seed_idx])
-            #     loggable_metrics[f"seed_{seed_idx}/adaptation_rate"] = float(metric["adaptation_rate"][seed_idx])
-            #     loggable_metrics[f"seed_{seed_idx}/success_rate"] = float(metric["success_rate"][seed_idx])
-            #     loggable_metrics[f"seed_{seed_idx}/policy_diversity"] = float(metric["policy_diversity"][seed_idx])
-
-            # # Log update step and env step separately
-            # loggable_metrics["update_step"] = int(update_step)
-            # loggable_metrics["env_step"] = int(update_step * config["NUM_STEPS"] * config["NUM_ENVS"])
-
-            # # Compute aggregated metrics separately
-            # aggregated_metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
-            # aggregated_metric["update_step"] = int(update_step)
-            # aggregated_metric["env_step"] = int(update_step * config["NUM_STEPS"] * config["NUM_ENVS"])
-
-            # # Log metrics using `jax.debug.callback`
-            # def callback():
-            #     wandb.log(loggable_metrics)
             
-            # jax.debug.callback(callback)
-
             runner_state = (train_state, env_state, last_obs, update_step, rng)
             return runner_state, metric
 
         rng, _rng = jax.random.split(rng)
         runner_state = (train_state, env_state, obsv, 0, _rng)
-        runner_state, metrics = jax.lax.scan(
-            lambda state, unused: _update_step(state, unused, pretrained_params),  
-            runner_state,
-            None,
-            config["NUM_UPDATES"]
+        runner_state, metric = jax.lax.scan(
+            _update_step, runner_state, None, config["NUM_UPDATES"]
         )
-        return {"runner_state": runner_state, "metrics": metrics}
+        return {"runner_state": runner_state, "metrics": metric}
 
     return train
 
@@ -1239,18 +1378,12 @@ def main(config):
         f"{model_dir_name}_{config['SEED']}"
     )
     os.makedirs(save_dir, exist_ok=True)
+    
 
     # Setup random seeds and training
     rng = jax.random.PRNGKey(config["SEED"])
     rngs = jax.random.split(rng, config["NUM_SEEDS"])    
-
-    # Load pretrained parameters once at this level
-    pretrained_params = load_training_results(config["LOAD_PATH"], load_type="params", config=config)
-    print("shape of pretrained_params:", jax.tree_util.tree_map(lambda x: x.shape, pretrained_params))
-
-    # Start training
-    train_fn = make_train(config)
-    train_jit = jax.jit(lambda rng: train_fn(rng, pretrained_params))
+    train_jit = jax.jit(make_train(config))
     out = jax.vmap(train_jit)(rngs)
 
     # Save parameters and results

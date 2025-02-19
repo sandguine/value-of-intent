@@ -476,29 +476,21 @@ def load_training_results(load_dir, load_type="params", config=None):
                 all_params = pickle.load(f)
             
             num_seeds = len(all_params.keys())
+            print("num seeds", num_seeds)
 
             # Ensure correct structure
             if not isinstance(all_params, dict) or len(all_params) == 0:
                 raise ValueError(f"Invalid parameter structure in {pickle_path}. Expected a dict with seed keys.")
 
-            num_seeds = len(all_params)
-            if num_seeds < config["NUM_ENVS"]:
-                raise ValueError(f"Not enough seeds to sample from. Found {num_seeds}, need at least {config['NUM_ENVS']}.")
-
             # Convert parameters to JAX-compatible format
             all_params = jax.tree_util.tree_map(jnp.array, all_params)
             all_params = flax.core.freeze(all_params)
+            print("shape of all_params:", jax.tree_util.tree_map(lambda x: x.shape, all_params))
 
-            # Randomly sample 16 seeds
-            seed_keys = list(all_params.keys())
-            sampled_indices = jax.random.choice(subkey, jnp.arange(num_seeds), shape=(16,), replace=False)
-            sampled_keys = [seed_keys[i] for i in sampled_indices.tolist()]
+            sampled_indices = jax.random.choice(subkey, num_seeds, shape=(16,), replace=False)
+            # Extract 16 sampled parameter sets
+            sampled_params = jax.tree_util.tree_map(lambda x: x[sampled_indices], all_params)
 
-            # Extract and stack parameters for the sampled seeds
-            sampled_params_list = [all_params[k]["params"] for k in sampled_keys]
-            sampled_params = jax.tree_util.tree_multimap(
-                lambda *x: jnp.stack(x, axis=0), *sampled_params_list
-            )
             print("shape of sampled_params:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params))
             # Reshape for easier access if needed
             # sampled_params_reshaped = jax.tree_util.tree_map(lambda x: x.squeeze(axis=1), sampled_params)
@@ -511,19 +503,13 @@ def load_training_results(load_dir, load_type="params", config=None):
             # print(sampled_params)
 
             # Freeze for JAX compatibility
-            sampled_params = flax.core.freeze(sampled_params)
+            # sampled_params = flax.core.freeze(sampled_params)
 
             print("Successfully loaded pretrained model.")
             print("Loaded params type:", type(sampled_params))  # Should be <FrozenDict>
             print("Keys in params:", sampled_params.keys())
             print("Shape of sampled_params:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params))
 
-            return sampled_params
-
-            # print("Successfully loaded pretrained model.")
-            # print("Loaded params type:", type(sampled_params))  # Should be <FrozenDict>
-            # print("Keys in params:", sampled_params.keys())
-            
             return sampled_params
                 
     elif load_type == "complete":

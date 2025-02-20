@@ -324,7 +324,7 @@ def save_training_results(save_dir, out, config, prefix=""):
             if hasattr(train_state, 'params'):
                 processed_params = process_tree(train_state.params)
                 if processed_params is not None:
-                    processed_state['params'] = processed_params
+                    processed_state['params'] = processed_params['params']
             
             # Handle step count if it exists
             if hasattr(train_state, 'step'):

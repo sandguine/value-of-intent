@@ -478,18 +478,45 @@ def load_training_results(load_dir, load_type="params", config=None):
             num_seeds = len(all_params.keys())
             print("num seeds", num_seeds)
 
-            # Ensure correct structure
-            if not isinstance(all_params, dict) or len(all_params) == 0:
-                raise ValueError(f"Invalid parameter structure in {pickle_path}. Expected a dict with seed keys.")
+            # # Convert parameters to JAX-compatible format
+            # all_params = jax.tree_util.tree_map(jnp.array, all_params)
+            # all_params = flax.core.freeze(all_params)
 
-            # Convert parameters to JAX-compatible format
-            all_params = jax.tree_util.tree_map(jnp.array, all_params)
+            # print("Type of all_params:", type(all_params))
+            # print("Top-level keys in all_params:", list(all_params.keys()))
+            # print("Number of seeds:", len(all_params.keys()))
+
+            # # Inspect the first seed
+            # first_seed = next(iter(all_params))
+            # print(f"\nInspecting seed: {first_seed}")
+            # print("Type of data in first seed:", type(all_params[first_seed]))
+            # print("Keys in first seed:", list(all_params[first_seed].keys()))
+
+            # # Go deeper into params if it exists
+            # if 'params' in all_params[first_seed]:
+            #     print("Keys in first_seed['params']:", list(all_params[first_seed]['params'].keys()))
+            #     print("Example param shape:", jax.tree_util.tree_map(lambda x: x.shape, all_params[first_seed]['params']))
+            # else:
+            #     print("No 'params' key inside first seed. Structure might differ.")
+
             all_params = flax.core.freeze(all_params)
-            print("shape of all_params:", jax.tree_util.tree_map(lambda x: x.shape, all_params))
 
-            sampled_indices = jax.random.choice(subkey, num_seeds, shape=(16,), replace=False)
+            # with open("output_log.txt", "w") as f:
+            #     print("shape of all_params:", jax.tree_util.tree_map(lambda x: x.shape, all_params), file=f)
+
+            sampled_indices = jax.random.permutation(subkey, num_seeds)[:16]
+
+            # sampled_indices = jax.random.choice(subkey, num_seeds, shape=(16,), replace=False)
+            print("sampled_indices", sampled_indices)
+
+            sampled_params_list = [{'params': all_params[f'seed_{i}']['params']} for i in sampled_indices]
+
             # Extract 16 sampled parameter sets
-            sampled_params = jax.tree_util.tree_map(lambda x: x[sampled_indices], all_params)
+            sampled_params = jax.tree_util.tree_map(
+                lambda *x: jnp.stack(x, axis=0), *sampled_params_list
+            )
+            # sampled_params = flax.core.freeze(sampled_params)
+
 
             print("shape of sampled_params:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params))
             # Reshape for easier access if needed
@@ -507,8 +534,7 @@ def load_training_results(load_dir, load_type="params", config=None):
 
             print("Successfully loaded pretrained model.")
             print("Loaded params type:", type(sampled_params))  # Should be <FrozenDict>
-            print("Keys in params:", sampled_params.keys())
-            print("Shape of sampled_params:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params))
+            # print("Shape of sampled_params:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params))
 
             return sampled_params
                 
@@ -762,21 +788,23 @@ def make_train(config):
 
                 # Extract correct agent_1 parameters per environment
                 num_envs = last_obs['agent_1'].shape[0]  # Should be 16
+                print("num_envs:", num_envs)
 
-                def apply_agent_1(env_idx):
-                    """
-                    Applies the pretrained agent_1 policy for a specific environment index.
-                    This ensures that each agent_1 gets its corresponding parameters.
-                    """
-                    agent_1_obs = last_obs['agent_1'][env_idx].reshape(-1)  # Shape: (520,)
-                    agent_1_pi, _ = network.apply(
-                        jax.tree_util.tree_map(lambda x: x[env_idx], pretrained_params),  # Extract per-env params
-                        agent_1_obs
-                    )
-                    return agent_1_pi.sample(seed=rng_action_1)
+                agent_1_obs = last_obs['agent_1'].reshape(num_envs, -1)  # Shape: (520,)
+                print("agent_1_obs shape:", agent_1_obs.shape)
+
+                print("pretrained_params structure before network.apply call:")
+                jax.tree_util.tree_map(lambda x: print(f"Type: {type(x)}, Shape: {getattr(x, 'shape', 'N/A')}"), pretrained_params)
+
+                rng_action_1_split = jax.random.split(rng_action_1, num_envs)
+
+                agent_1_action = jax.vmap(
+                    lambda params, obs, rng: network.apply(params, obs)[0].sample(seed=rng),
+                    in_axes=(0, 0, 0)
+                )(pretrained_params, agent_1_obs, rng_action_1_split)  # agent_1_action: (16,)
 
                 # Vectorized application across all environments
-                agent_1_action = jax.vmap(apply_agent_1)(jnp.arange(num_envs))  # Shape: (16,)
+                # agent_1_action = jax.vmap(apply_agent_1)(jnp.arange(num_envs))  # Shape: (16,)
 
                 # Agent 0: Augment its observation
                 agent_0_obs = last_obs['agent_0'].reshape(num_envs, -1)  # Shape: (16, 520)
@@ -1051,10 +1079,10 @@ def make_train(config):
             min_reward = jnp.min(rewards_per_env)
             max_reward = jnp.max(rewards_per_env)
 
-            metric["mean_reward"] = float(mean_reward)
-            metric["std_reward"] = float(std_reward)
-            metric["min_reward"] = float(min_reward)
-            metric["max_reward"] = float(max_reward)
+            metric["mean_reward"] = jax.device_get(mean_reward)
+            metric["std_reward"] = jax.device_get(std_reward)
+            metric["min_reward"] = jax.device_get(min_reward)
+            metric["max_reward"] = jax.device_get(max_reward)
 
             rng = update_state[-1]
 
@@ -1255,7 +1283,9 @@ def main(config):
 
     # Load pretrained parameters once at this level
     pretrained_params = load_training_results(config["LOAD_PATH"], load_type="params", config=config)
-    print("shape of pretrained_params:", jax.tree_util.tree_map(lambda x: x.shape, pretrained_params))
+    # print("shape of pretrained_params:", jax.tree_util.tree_map(lambda x: x.shape, pretrained_params))
+    # print("pretrained_params type:", type(pretrained_params))
+    # print("pretrained_params structure:", pretrained_params)
 
     # Start training
     train_fn = make_train(config)

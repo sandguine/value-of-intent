@@ -422,15 +422,6 @@ def create_visualization(train_state, config, filename, save_dir=None, agent_vie
     viz.animate(state_seq, agent_view_size=agent_view_size, filename=clean_filename)
 
 def load_sweep_config(path: str) -> Dict[Any, Any]:
-    """
-    Loads and validates WandB sweep configuration.
-    
-    Args:
-        path: Path to sweep YAML file
-        
-    Returns:
-        Dict containing sweep configuration
-    """
     with open(path, 'r') as f:
         sweep_config = yaml.safe_load(f)
     

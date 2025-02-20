@@ -189,34 +189,17 @@ def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=
     Returns:
         Dictionary containing episode trajectory data including states, rewards, and shaped rewards.
     """
-    if "DIMS" not in config:
-        raise ValueError("Config is missing DIMS dictionary. Check that dimensions were properly initialized in main()")
-    
-    dims = config["DIMS"]
-
-    print("\nRollout Dimensions:")
-    print(f"Base observation shape: {dims['base_obs_shape']} -> {dims['base_obs_dim']}")
-    print(f"Action dimension: {dims['action_dim']}")
-    print(f"Augmented observation dim: {dims['augmented_obs_dim']}\n")
-
-    # Initialize environment
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
 
-    # Verify dimensions
-    assert np.prod(env.observation_space().shape) == dims["base_obs_dim"], \
-        "Observation dimension mismatch in rollout"
-    assert env.action_space().n == dims["action_dim"], \
-        "Action dimension mismatch in rollout"
-
-    # Initialize network
-    network = ActorCritic(
-        action_dim=dims["action_dim"],
-        activation=config["ACTIVATION"]
-    )
-    
-    # Initialize seeds
+    network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"])
     key = jax.random.PRNGKey(0)
     key, key_a, key_r = jax.random.split(key, 3)
+
+    init_x = jnp.zeros(env.observation_space().shape)
+    init_x = init_x.flatten()
+
+    network.init(key_a, init_x)
+    network_params = train_state.params
 
     # Reset environment before using obs
     obs, state = env.reset(key_r)
@@ -1248,7 +1231,7 @@ def main(config):
         tags=["IPPO", "FF", "Adaptability", "Oracle"],
         config=config,
         mode=config["WANDB_MODE"],
-        name=f'adaptability_ff_ippo_oc_{config["ENV_KWARGS"]["layout"]}'
+        name='adaptability'
     )
 
     print("\nVerifying config before rollout:")
@@ -1265,7 +1248,7 @@ def main(config):
     config["ENV_KWARGS"]["layout"] = overcooked_layouts[layout_name]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
-    model_dir_name = create_safe_filename("adaptability_ff_ippo_oc", config, timestamp)
+    model_dir_name = create_safe_filename("adaptability_", config, timestamp)
     save_dir = os.path.join(
         "saved_models", 
         date,
@@ -1303,7 +1286,7 @@ def main(config):
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
     viz_base_name = create_safe_filename("adaptability", config, timestamp)
     viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
-    create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
+    # create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
     
     print('** Saving Results **')
     print("Original shape:", out["metrics"]["returned_episode_returns"].shape)

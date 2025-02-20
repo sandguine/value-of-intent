@@ -287,33 +287,6 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     x = x.reshape((num_actors, num_envs, -1)) # This reshapes the observation space to a 3D array with the shape (num_actors, num_envs, -1)
     return {a: x[i] for i, a in enumerate(agent_list)} # This returns the observation space for the agents
 
-def validate_batching(pretrained_params, transitions, config):
-    """Validate correct batching and partner assignment."""
-    # Check partner parameter consistency
-    assert len(pretrained_params) == config["NUM_ENVS"], \
-        f"Mismatch in partner parameters: {len(env_partner_params)} vs {config['NUM_ENVS']} environments"
-    
-    # Validate transition shapes
-    expected_batch_shape = (config["NUM_ENVS"],)
-    assert transitions.done.shape == expected_batch_shape, \
-        f"Wrong done shape: {transitions.done.shape} vs {expected_batch_shape}"
-    assert transitions.action.shape == expected_batch_shape, \
-        f"Wrong action shape: {transitions.action.shape} vs {expected_batch_shape}"
-    
-    # Validate observation augmentation
-    expected_obs_shape = (config["NUM_ENVS"], config["DIMS"]["augmented_obs_dim"])
-    assert transitions.obs.shape == expected_obs_shape, \
-        f"Wrong observation shape: {transitions.obs.shape} vs {expected_obs_shape}"
-    
-    # Print first few steps for manual inspection
-    print("\nBatching Validation:")
-    print(f"Number of environments: {config['NUM_ENVS']}")
-    print(f"Partner parameter sets: {len(env_partner_params)}")
-    print(f"Observation shape: {transitions.obs.shape}")
-    print(f"Action shape: {transitions.action.shape}")
-    
-    return True
-
 def save_training_results(save_dir, out, config, prefix=""):
     """
     Save both complete training output and seed-specific parameters in JAX and pickle/npz formats.

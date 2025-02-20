@@ -8,7 +8,7 @@ SHARED_POLICY: true                   # Whether to use a shared policy for the a
 # Environment Settings
 ENV_NAME: "overcooked"                # Environment used for training
 ENV_KWARGS: 
-  layout : "forced_coord"         # Overcooked layout (can be overridden during sweeps)
+  layout : "asymm_advantages"         # Overcooked layout (can be overridden during sweeps)
 
 ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
 

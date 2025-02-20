@@ -870,7 +870,7 @@ def main(config):
         tags=["IPPO", "FF", "Adaptability", "Oracle", "Lowerbound"],
         config=config,
         mode=config["WANDB_MODE"],
-        name='adaptability_lowerbound'
+        name=f'adaptability_lb_{layout_name}'
     )
 
     print("\nVerifying config before rollout:")

@@ -421,24 +421,6 @@ def create_visualization(train_state, config, filename, save_dir=None, agent_vie
         clean_filename = os.path.join(save_dir, clean_filename)
     viz.animate(state_seq, agent_view_size=agent_view_size, filename=clean_filename)
 
-def create_safe_filename(base_name, config, timestamp=None):
-    """Creates a safe filename for saving visualizations and plots"""
-    if timestamp is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # Extract just the layout name without the full configuration
-    layout_name = config["ENV_KWARGS"].get("layout_name", "default")
-    if isinstance(layout_name, (dict, jax.Array, np.ndarray)):
-        layout_name = "custom_layout"
-    
-    # Generate a safe filename
-    safe_name = f"{base_name}_{layout_name}_{timestamp}"
-    
-    # Remove any unsafe characters
-    safe_name = "".join(c for c in safe_name if c.isalnum() or c in "_-")
-    
-    return safe_name
-
 def load_sweep_config(path: str) -> Dict[Any, Any]:
     """
     Loads and validates WandB sweep configuration.
@@ -850,7 +832,7 @@ def main(hydra_config):
     # Create results directory with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
-    model_dir_name = create_safe_filename("bl_ff_ippo_oc", config, timestamp)
+    model_dir_name = f"bl_ff_ippo_oc_{layout_name}_{timestamp}"
     save_dir = os.path.join(
         "saved_models", 
         date,
@@ -877,7 +859,7 @@ def main(hydra_config):
         
     # Create and save visualization
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-    viz_base_name = create_safe_filename("bl_ff_ippo_oc", config, timestamp)
+    viz_base_name = f"bl_ff_ippo_oc_{layout_name}_{timestamp}"
     viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
     create_visualization(train_state, config, viz_filename, save_dir)
     
@@ -895,7 +877,7 @@ def main(hydra_config):
     plt.xlabel("Update Step")
     plt.ylabel("Return")
     
-    learning_curve_name = create_safe_filename(f"{config['ENV_NAME']}_learning_curve", config, timestamp)
+    learning_curve_name = f"{config['ENV_NAME']}_learning_curve"
     plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))
     plt.close()
 

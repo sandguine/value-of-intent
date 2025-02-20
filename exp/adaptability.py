@@ -526,24 +526,6 @@ def create_visualization(train_state, agent_1_params, is_shared_params, config, 
         clean_filename = os.path.join(save_dir, clean_filename)
     viz.animate(state_seq, agent_view_size=agent_view_size, filename=clean_filename)
 
-def create_safe_filename(base_name, config, timestamp=None):
-    """Creates a safe filename for saving visualizations and plots"""
-    if timestamp is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    # Extract just the layout name without the full configuration
-    layout_name = config["ENV_KWARGS"].get("layout_name", "default")
-    if isinstance(layout_name, (dict, jax.Array, np.ndarray)):
-        layout_name = "custom_layout"
-    
-    # Generate a safe filename
-    safe_name = f"{base_name}_{layout_name}_{timestamp}"
-    
-    # Remove any unsafe characters
-    safe_name = "".join(c for c in safe_name if c.isalnum() or c in "_-")
-    
-    return safe_name
-
 def make_train(config):
     """Creates the main training function for IPPO with the given configuration.
     
@@ -1222,7 +1204,7 @@ def main(config):
     config["ENV_KWARGS"]["layout"] = overcooked_layouts[layout_name]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
-    model_dir_name = create_safe_filename("adaptability_", config, timestamp)
+    model_dir_name = f"adaptability_{layout_name}_{timestamp}"
     save_dir = os.path.join(
         "saved_models", 
         date,
@@ -1287,7 +1269,7 @@ def main(config):
     plt.xlabel("Update Step")
     plt.ylabel("Return")
     
-    learning_curve_name = create_safe_filename(f"{config['ENV_NAME']}_learning_curve", config, timestamp)
+    learning_curve_name = f"learning_curve_{layout_name}"
     plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))
     plt.close()
 

@@ -385,16 +385,6 @@ def save_training_results(save_dir, out, config, prefix=""):
         print("Warning: No seed-specific parameters were successfully processed")
 
 def load_training_results(load_dir, load_type="params", config=None):
-    """
-    Load training results from pickle format
-    
-    Args:
-        load_dir: Directory containing saved files
-        prefix: Prefix used in filenames
-        load_type: Either "params" or "complete" to load just params or complete output
-    Returns:
-        Loaded data converted to JAX arrays where appropriate
-    """
     key = jax.random.PRNGKey(0) 
     key, subkey = jax.random.split(key)
 
@@ -411,7 +401,7 @@ def load_training_results(load_dir, load_type="params", config=None):
             all_params = flax.core.freeze(all_params)
             num_envs = config["NUM_ENVS"]
 
-            sampled_indices = jax.random.permutation(subkey, num_seeds)[:num_envs] # Sample equivalent to NUM_ENVS
+            sampled_indices = jax.random.choice(subkey, num_seeds, shape=(num_envs,), replace=False) # Sample equivalent to NUM_ENVS
 
             print("sampled_indices", sampled_indices)
 

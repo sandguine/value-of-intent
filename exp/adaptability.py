@@ -559,7 +559,7 @@ def create_visualization(train_state, config, filename, save_dir=None, agent_vie
     clean_filename = f"{base_name}.gif"  # Force .gif extension
     
     # Get the rollout
-    state_seq = get_rollout(train_state, config, save_dir)
+    state_seq = get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir)
     
     # Create visualization
     viz = OvercookedVisualizer()
@@ -788,13 +788,10 @@ def make_train(config):
 
                 # Extract correct agent_1 parameters per environment
                 num_envs = last_obs['agent_1'].shape[0]  # Should be 16
-                print("num_envs:", num_envs)
+                # print("num_envs:", num_envs)
 
                 agent_1_obs = last_obs['agent_1'].reshape(num_envs, -1)  # Shape: (520,)
-                print("agent_1_obs shape:", agent_1_obs.shape)
-
-                print("pretrained_params structure before network.apply call:")
-                jax.tree_util.tree_map(lambda x: print(f"Type: {type(x)}, Shape: {getattr(x, 'shape', 'N/A')}"), pretrained_params)
+                # print("agent_1_obs shape:", agent_1_obs.shape)
 
                 rng_action_1_split = jax.random.split(rng_action_1, num_envs)
 

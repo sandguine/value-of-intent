@@ -460,9 +460,10 @@ def load_training_results(load_dir, load_type="params", config=None):
             # with open("output_log.txt", "w") as f:
             #     print("shape of all_params:", jax.tree_util.tree_map(lambda x: x.shape, all_params), file=f)
 
-            sampled_indices = jax.random.permutation(subkey, num_seeds)[:16]
+            # sampled_indices = jax.random.permutation(subkey, num_seeds)[:16]
+            num_envs = config["NUM_ENVS"]
 
-            # sampled_indices = jax.random.choice(subkey, num_seeds, shape=(16,), replace=False)
+            sampled_indices = jax.random.choice(subkey, num_seeds, shape=(num_envs,), replace=False)
             print("sampled_indices", sampled_indices)
 
             sampled_params_list = [{'params': all_params[f'seed_{i}']['params']} for i in sampled_indices]

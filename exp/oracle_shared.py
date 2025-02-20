@@ -410,15 +410,15 @@ def save_training_results(save_dir, out, config, prefix=""):
             print(f"Warning: Skipping unpickleable key '{key}' in output due to: {str(e)}")
 
     # Save the entire training output in pickle and npz formats
-    pickle_out_path = os.path.join(save_dir, f"{prefix}complete_out.pkl")
+    pickle_out_path = os.path.join(save_dir, f"complete_out.pkl")
     with open(pickle_out_path, 'wb') as f:
         pickle.dump(pickle_safe_out, f)
-    print(f"Saved complete training output in pickle format: {pickle_out_path}")
+    # print(f"Saved complete training output in pickle format: {pickle_out_path}")
 
     # Save the complete output in npz format (for compatibility)
-    npz_out_path = os.path.join(save_dir, f"{prefix}complete_out.npz")
+    npz_out_path = os.path.join(save_dir, f"complete_out.npz")
     np.savez(npz_out_path, **pickle_safe_out)
-    print(f"Saved complete training output in npz format: {npz_out_path}")
+    # print(f"Saved complete training output in npz format: {npz_out_path}")
 
     # Collect seed-specific parameters into a single dictionary
     all_seeds_params = {}
@@ -442,7 +442,7 @@ def save_training_results(save_dir, out, config, prefix=""):
             if hasattr(train_state, 'params'):
                 processed_params = process_tree(train_state.params)
                 if processed_params is not None:
-                    processed_state['params'] = processed_params
+                    processed_state['params'] = processed_params['params']
             
             # Handle step count if it exists
             if hasattr(train_state, 'step'):
@@ -473,13 +473,13 @@ def save_training_results(save_dir, out, config, prefix=""):
     # Save seed-specific parameters if we have any
     if all_seeds_params:
         # Save as pickle first (our validation format)
-        pickle_seeds_path = os.path.join(save_dir, f"{prefix}all_seeds_params.pkl")
+        pickle_seeds_path = os.path.join(save_dir, f"all_seeds_params.pkl")
         with open(pickle_seeds_path, 'wb') as f:
             pickle.dump(all_seeds_params, f)
         print(f"Saved all seed-specific parameters in pickle format: {pickle_seeds_path}")
         
         # Then save as npz for compatibility
-        npz_seeds_path = os.path.join(save_dir, f"{prefix}all_seeds_params.npz")
+        npz_seeds_path = os.path.join(save_dir, f"all_seeds_params.npz")
         np.savez(npz_seeds_path, **all_seeds_params)
         print(f"Saved all seed-specific parameters in npz format: {npz_seeds_path}")
     else:

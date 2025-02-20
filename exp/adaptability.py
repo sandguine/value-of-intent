@@ -552,7 +552,7 @@ def load_training_results(load_dir, load_type="params", config=None):
     
     raise FileNotFoundError(f"No saved {load_type} found in {load_dir}")
 
-def create_visualization(train_state, config, filename, save_dir=None, agent_view_size=5):
+def create_visualization(train_state, agent_1_params, is_shared_params, config, filename, save_dir=None, agent_view_size=5):
     """Helper function to create and save visualization"""
     # Ensure we have a clean filename
     base_name = os.path.splitext(os.path.basename(filename))[0]
@@ -630,15 +630,15 @@ def make_train(config):
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
 
-    # Configuration printing
-    print("Initializing training with config:")
-    print(f"NUM_ENVS: {config['NUM_ENVS']}")
-    print(f"NUM_STEPS: {config['NUM_STEPS']}")
-    print(f"NUM_UPDATES: {config['NUM_UPDATES']}")
-    print(f"NUM_MINIBATCHES: {config['NUM_MINIBATCHES']}")
-    print(f"TOTAL_TIMESTEPS: {config['TOTAL_TIMESTEPS']}")
-    print(f"ENV_NAME: {config['ENV_NAME']}")
-    print(f"DIMS: {config['DIMS']}")
+    # # Configuration printing
+    # print("Initializing training with config:")
+    # print(f"NUM_ENVS: {config['NUM_ENVS']}")
+    # print(f"NUM_STEPS: {config['NUM_STEPS']}")
+    # print(f"NUM_UPDATES: {config['NUM_UPDATES']}")
+    # print(f"NUM_MINIBATCHES: {config['NUM_MINIBATCHES']}")
+    # print(f"TOTAL_TIMESTEPS: {config['TOTAL_TIMESTEPS']}")
+    # print(f"ENV_NAME: {config['ENV_NAME']}")
+    # print(f"DIMS: {config['DIMS']}")
     
     env = LogWrapper(env, replace_info=False)
     
@@ -858,18 +858,18 @@ def make_train(config):
             last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1)
             last_obs_agent0_augmented = jnp.concatenate([last_obs_agent0, one_hot_last_action], axis=-1)
             _, agent_0_last_val = network.apply(train_state.params, last_obs_agent0_augmented)
-            print("agent_0_last_val shape:", agent_0_last_val.shape)
+            # print("agent_0_last_val shape:", agent_0_last_val.shape)
 
             # Combine values for advantage calculation
             _, last_val = network.apply(train_state.params, last_obs_agent0_augmented)
 
             # calculate_gae itself didn't need to be changed because we can use the same advantage function for both agents
             def _calculate_gae(traj_batch, last_val):
-                print(f"\nGAE Calculation Debug:")
-                print("traj_batch types:", jax.tree_util.tree_map(lambda x: x.dtype, traj_batch))
-                print(f"traj_batch shapes:", jax.tree_util.tree_map(lambda x: x.shape, traj_batch))
-                print("last_val types:", jax.tree_util.tree_map(lambda x: x.dtype, last_val))
-                print(f"last_val shape: {last_val.shape}")
+                # print(f"\nGAE Calculation Debug:")
+                # print("traj_batch types:", jax.tree_util.tree_map(lambda x: x.dtype, traj_batch))
+                # print(f"traj_batch shapes:", jax.tree_util.tree_map(lambda x: x.shape, traj_batch))
+                # print("last_val types:", jax.tree_util.tree_map(lambda x: x.dtype, last_val))
+                # print(f"last_val shape: {last_val.shape}")
                 
 
                 def _get_advantages(gae_and_next_value, transition):
@@ -883,10 +883,10 @@ def make_train(config):
         
                      # Calculate delta and GAE per agent
                     delta = reward + config["GAMMA"] * next_value * (1 - done) - value
-                    print(f"delta shape: {delta.shape}, value: {delta}")
+                    # print(f"delta shape: {delta.shape}, value: {delta}")
 
                     gae = delta + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    print(f"calculated gae shape: {gae.shape}, value: {gae}")
+                    #print(f"calculated gae shape: {gae.shape}, value: {gae}")
                     
                     return (gae, value), gae
 
@@ -904,18 +904,18 @@ def make_train(config):
                 )
 
                 # Calculate returns (advantages + value estimates)
-                print(f"\nFinal shapes:")
-                print(f"advantages shape: {advantages.shape}")
-                print(f"returns shape: {(advantages + traj_batch.value).shape}")
+                # print(f"\nFinal shapes:")
+                # print(f"advantages shape: {advantages.shape}")
+                # print(f"returns shape: {(advantages + traj_batch.value).shape}")
                 return advantages, advantages + traj_batch.value
 
             # Calculate advantages 
             advantages, targets = _calculate_gae(traj_batch, last_val)
-            print("advantages shape:", advantages.shape)
-            print("targets shape:", targets.shape)
-            print("traj_batch value shape:", traj_batch.value.shape)
-            print("traj_batch reward shape:", traj_batch.reward.shape)
-            print("traj_batch data types:", jax.tree_util.tree_map(lambda x: x.dtype, traj_batch))
+            # print("advantages shape:", advantages.shape)
+            # print("targets shape:", targets.shape)
+            # print("traj_batch value shape:", traj_batch.value.shape)
+            # print("traj_batch reward shape:", traj_batch.reward.shape)
+            # print("traj_batch data types:", jax.tree_util.tree_map(lambda x: x.dtype, traj_batch))
 
             # UPDATE NETWORK
             def _update_epoch(update_state, unused, config):
@@ -924,8 +924,8 @@ def make_train(config):
                     # Unpack batch_info which now contains separate agent data
                     agent_0_data = batch_info['agent_0']
                     
-                    print("Minibatch shapes:")
-                    print("Agent 0 data:", jax.tree_util.tree_map(lambda x: x.shape, agent_0_data))
+                    # print("Minibatch shapes:")
+                    # print("Agent 0 data:", jax.tree_util.tree_map(lambda x: x.shape, agent_0_data))
 
                     traj_batch = agent_0_data['traj']
                     advantages = agent_0_data['advantages']
@@ -973,8 +973,8 @@ def make_train(config):
 
                     # Compute gradient norms correctly
                     grad_norm_0 = optax.global_norm(grads_0)
-                    print(f"\nGradient stats:")
-                    print(f"Grad norm agent_0: {grad_norm_0}")
+                    # print(f"\nGradient stats:")
+                    # print(f"Grad norm agent_0: {grad_norm_0}")
 
                     # Update only agent_0
                     train_state = train_state.apply_gradients(grads=grads_0)
@@ -1303,7 +1303,7 @@ def main(config):
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
     viz_base_name = create_safe_filename("adaptability", config, timestamp)
     viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
-    create_visualization(train_state, config, viz_filename, save_dir)
+    create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
     
     print('** Saving Results **')
     print("Original shape:", out["metrics"]["returned_episode_returns"].shape)

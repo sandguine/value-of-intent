@@ -718,9 +718,13 @@ def make_train(config):
             metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
             metric["shaped_reward_annealed"] = metric["shaped_reward"]*rew_shaping_anneal(current_timestep)
             
-            print("traj_batch reward shape:", traj_batch.reward.shape)
+            print("Reward Shape:", traj_batch.reward.shape)
+            print("Sample rewards (first step):", traj_batch.reward[0, :])
+            print("Sample rewards (first env across steps):", traj_batch.reward[:, 0])
 
             rewards_per_env = traj_batch.reward.mean(axis=0)
+            overall_average = traj_batch.reward.mean()
+
             mean_reward = jnp.mean(rewards_per_env)
             std_reward = jnp.std(rewards_per_env)
             min_reward = jnp.min(rewards_per_env)

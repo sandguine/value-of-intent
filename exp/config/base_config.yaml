@@ -17,7 +17,7 @@ LR: 2.5e-4                            # Learning rate
 ANNEAL_LR: true                       # Whether to anneal the learning rate linearly over time
 NUM_ENVS: 128                         # Number of parallel environments for sample collection
 NUM_STEPS: 128                        # Number of steps per environment before updating the policy
-TOTAL_TIMESTEPS: 5e7             # Total timesteps to run the experiment (increased from previous)
+TOTAL_TIMESTEPS: 5e7                  # Total timesteps to run the experiment (increased from previous)
 UPDATE_EPOCHS: 4                      # Number of update epochs per PPO iteration
 NUM_MINIBATCHES: 4                    # Number of minibatches to split each batch during training
 GAMMA: 0.99                           # Discount factor for rewards
@@ -41,5 +41,5 @@ LOG_INTERVAL: 1000                    # Log metrics every 1000 steps
 
 # WandB Integration
 ENTITY: "sandily"                     # WandB entity name (organization or user)
-PROJECT: "modular"                    # WandB project name
+PROJECT: "test-adapt"                 # WandB project name
 WANDB_MODE: "online"                  # WandB mode (online, offline, disabled)

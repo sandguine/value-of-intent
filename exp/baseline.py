@@ -776,7 +776,7 @@ project_root = script_dir.parent.parent.parent  # This should be the JaxMARL roo
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
     
-@hydra.main(version_base=None, config_path="config", config_name="asymm_config")
+@hydra.main(version_base=None, config_path="config", config_name="base_config")
 def main(hydra_config):
     """
     Main entry point for training that handles path setup, configuration management,

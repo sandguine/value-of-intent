@@ -1,11 +1,11 @@
 # General Experiment Settings
 SEED: 30                              # Random seed for reproducibility
-NUM_SEEDS: 100                         # Default for hyperparameter tuning (use 100 for adaptability tests)
+NUM_SEEDS: 100                        # Default for hyperparameter tuning (use 100 for adaptability tests)
 
 # Environment Settings
 ENV_NAME: "overcooked"                # Environment used for training
 ENV_KWARGS: 
-  layout : "coord_ring"         # Overcooked layout (can be overridden during sweeps)
+  layout : "counter_circuit"          # Overcooked layout: cramped_room, asymm_advantages, counter_circuit, coord_ring, forced_coord
 
 ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
 

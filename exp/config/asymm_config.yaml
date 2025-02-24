@@ -1,14 +1,11 @@
 # General Experiment Settings
 SEED: 30                              # Random seed for reproducibility
-NUM_SEEDS: 10                         # Default for hyperparameter tuning (use 100 for adaptability tests)
-TRAINING_MODE: standard               # Options: adaptability, standard
-AGENT_TYPE: "baseline"                # Options: baseline, oracle
-SHARED_POLICY: true                   # Whether to use a shared policy for the agents
+NUM_SEEDS: 100                         # Default for hyperparameter tuning (use 100 for adaptability tests)
 
 # Environment Settings
 ENV_NAME: "overcooked"                # Environment used for training
 ENV_KWARGS: 
-  layout : "asymm_advantages"         # Overcooked layout (can be overridden during sweeps)
+  layout : "coord_ring"         # Overcooked layout (can be overridden during sweeps)
 
 ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
 

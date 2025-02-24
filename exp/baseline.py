@@ -743,7 +743,22 @@ def make_train(config):
             current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
             metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
             metric["shaped_reward_annealed"] = metric["shaped_reward"]*rew_shaping_anneal(current_timestep)
-            
+
+            reward_per_env = traj_batch.reward.mean(axis=0)
+            overall_average = traj_batch.reward.mean()
+
+            mean_reward = jnp.mean(reward_per_env)
+            overall_average = jnp.mean(overall_average)
+            std_reward = jnp.std(reward_per_env)
+            min_reward = jnp.min(reward_per_env)
+            max_reward = jnp.max(reward_per_env)
+
+            metric["mean_reward"] = jax.device_get(mean_reward)
+            metric["overall_average"] = jax.device_get(overall_average)
+            metric["std_reward"] = jax.device_get(std_reward)
+            metric["min_reward"] = jax.device_get(min_reward)
+            metric["max_reward"] = jax.device_get(max_reward)
+
             rng = update_state[-1]
 
             def callback(metric):
@@ -776,7 +791,7 @@ project_root = script_dir.parent.parent.parent  # This should be the JaxMARL roo
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
     
-@hydra.main(version_base=None, config_path="config", config_name="base_config")
+@hydra.main(version_base=None, config_path="config", config_name="asymm_config")
 def main(hydra_config):
     """
     Main entry point for training that handles path setup, configuration management,

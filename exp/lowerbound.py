@@ -790,12 +790,16 @@ def make_train(config):
             metric["shaped_reward_annealed"] = metric["shaped_reward"]*rew_shaping_anneal(current_timestep)
             
             rewards_per_env = traj_batch.reward.mean(axis=0)
+            overall_average = traj_batch.reward.mean()
+
             mean_reward = jnp.mean(rewards_per_env)
+            overall_average = jnp.mean(overall_average)
             std_reward = jnp.std(rewards_per_env)
             min_reward = jnp.min(rewards_per_env)
             max_reward = jnp.max(rewards_per_env)
 
             metric["mean_reward"] = jax.device_get(mean_reward)
+            metric["overall_average"] = jax.device_get(overall_average)
             metric["std_reward"] = jax.device_get(std_reward)
             metric["min_reward"] = jax.device_get(min_reward)
             metric["max_reward"] = jax.device_get(max_reward)

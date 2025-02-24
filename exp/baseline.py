@@ -225,8 +225,7 @@ def get_rollout(train_state, config, save_dir=None):
     if save_dir:
         reward_plot_path = os.path.join(save_dir, "reward_plot.png")
     else:
-        plot_name = create_safe_filename("reward_plot", config)
-        reward_plot_path = f"{plot_name}.png"
+        reward_plot_path = "reward_plot.png"
     plt.savefig(reward_plot_path)
     plt.close()
     plt.savefig(reward_plot_path)

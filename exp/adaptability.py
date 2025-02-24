@@ -122,7 +122,7 @@ class Transition(NamedTuple):
     obs: jnp.ndarray
 
 # need to fix get_rollout, not being called currently
-def get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir=None):
+def get_rollout(train_state, agent_1_params, config, save_dir=None):
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
 
     network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"])

@@ -942,13 +942,13 @@ def main(config):
     print("First few values of reward_mean:", reward_mean[:5])
     print("Check for NaN:", np.isnan(reward_mean).any())
     print("Range of values:", np.min(reward_mean), np.max(reward_mean))
-    reward_std = rewards.std(0) / np.sqrt(config["NUM_SEEDS"])
-    
+    reward_std = rewards.std(0)
+    reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
     plt.figure()
     plt.plot(reward_mean)
     plt.fill_between(range(len(reward_mean)), 
-                    reward_mean - reward_std,
-                    reward_mean + reward_std,
+                    reward_mean - reward_std_err,
+                    reward_mean + reward_std_err,
                     alpha=0.2)
     plt.xlabel("Update Step")
     plt.ylabel("Return")

@@ -884,19 +884,20 @@ def main(config):
     rewards = out["metrics"]["returned_episode_returns"].reshape((config["NUM_SEEDS"], -1))
     print("Shape of rewards:", rewards.shape)
     print("Values per seed:")
-    for i in range(5):
-        print(f"Seed {i}:", rewards[i])
+    # for i in range(5):
+    #     print(f"Seed {i}:", rewards[i])
     reward_mean = rewards.mean(0)
-    print("First few values of reward_mean:", reward_mean[:5])
+    # print("First few values of reward_mean:", reward_mean[:5])
     print("Check for NaN:", np.isnan(reward_mean).any())
     print("Range of values:", np.min(reward_mean), np.max(reward_mean))
-    reward_std = rewards.std(0) / np.sqrt(config["NUM_SEEDS"])
+    reward_std = rewards.std(0)
+    reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
     
     plt.figure()
     plt.plot(reward_mean)
     plt.fill_between(range(len(reward_mean)), 
-                    reward_mean - reward_std,
-                    reward_mean + reward_std,
+                    reward_mean - reward_std_err,
+                    reward_mean + reward_std_err,
                     alpha=0.2)
     plt.xlabel("Update Step")
     plt.ylabel("Return")

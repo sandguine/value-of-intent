@@ -871,13 +871,14 @@ def main(hydra_config):
     # Plot and save learning curves
     rewards = out["metrics"]["returned_episode_returns"].reshape((config["NUM_SEEDS"], -1))
     reward_mean = rewards.mean(0)
-    reward_std = rewards.std(0) / np.sqrt(config["NUM_SEEDS"])
+    reward_std = rewards.std(0)
+    reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
     
     plt.figure()
     plt.plot(reward_mean)
     plt.fill_between(range(len(reward_mean)), 
-                    reward_mean - reward_std,
-                    reward_mean + reward_std,
+                    reward_mean - reward_std_err,
+                    reward_mean + reward_std_err,
                     alpha=0.2)
     plt.xlabel("Update Step")
     plt.ylabel("Return")

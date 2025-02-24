@@ -8,7 +8,7 @@ SHARED_POLICY: true                   # Whether to use a shared policy for the a
 # Environment Settings
 ENV_NAME: "overcooked"                # Environment used for training
 ENV_KWARGS: 
-  layout: "coord_ring"              # Overcooked layout (can be overridden during sweeps)
+  layout: "counter_circuit"              # Overcooked layout (can be overridden during sweeps)
 
 ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
 
@@ -27,13 +27,6 @@ ENT_COEF: 0.01                        # Entropy regularization coefficient (test
 VF_COEF: 0.5                          # Coefficient for value function loss
 MAX_GRAD_NORM: 0.5                    # Maximum gradient norm for clipping
 REW_SHAPING_HORIZON: 2.5e7            # Horizon for reward shaping
-
-# Checkpointing and Results
-SAVE_CHECKPOINTS: true                # Whether to save checkpoints periodically
-CHECKPOINT_DIR: "checkpoints"         # Directory to save checkpoints
-CHECKPOINT_INTERVAL: 10000            # Save checkpoint every 10000 steps
-LOAD_CHECKPOINT: false                # Whether to load a checkpoint at the start
-CHECKPOINT_PATH: ""                   # Path to the checkpoint file to load (if applicable)
 
 # Results and Metrics
 RESULTS_DIR: "results"                # Directory to save results like metrics and learning curves

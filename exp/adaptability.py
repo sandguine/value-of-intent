@@ -365,14 +365,14 @@ def load_training_results(load_dir, load_type="params", config=None):
     
     raise FileNotFoundError(f"No saved {load_type} found in {load_dir}")
 
-def create_visualization(train_state, agent_1_params, is_shared_params, config, filename, save_dir=None, agent_view_size=5):
+def create_visualization(train_state, agent_1_params, config, filename, save_dir=None, agent_view_size=5):
     """Helper function to create and save visualization"""
     # Ensure we have a clean filename
     base_name = os.path.splitext(os.path.basename(filename))[0]
     clean_filename = f"{base_name}.gif"  # Force .gif extension
     
     # Get the rollout
-    state_seq = get_rollout(train_state, agent_1_params, is_shared_params, config, save_dir)
+    state_seq = get_rollout(train_state, agent_1_params, config, save_dir)
     
     # Create visualization
     viz = OvercookedVisualizer()
@@ -862,7 +862,7 @@ def main(config):
 
     # Save parameters and results
     save_training_results(save_dir, out, config, prefix="adaptability_")
-    np.savez(os.path.join(save_dir, "metrics.npz"), 
+    np.savez(os.path.join(save_dir, "op_metrics.npz"), 
              **{key: np.array(value) for key, value in out["metrics"].items()})
     
     with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:

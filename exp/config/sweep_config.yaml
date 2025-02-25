@@ -9,12 +9,14 @@ parameters:
     values: [1e-5, 1e-4, 1e-3]
   ENT_COEF:
     values: [0.01, 0.05]
-  GAMMA:
-    values: [0.98, 0.99, 0.995]
-  NUM_STEPS:
+  NUM_ENVS:
     values: [128, 256]
-  CLIP_EPS:
-    values: [0.1, 0.2, 0.3]
+  # GAMMA:
+  #   values: [0.98, 0.99, 0.995]
+  # NUM_STEPS:
+  #   values: [128, 256]
+  # CLIP_EPS:
+  #   values: [0.1, 0.2, 0.3]
 
 command:
   - ${env}

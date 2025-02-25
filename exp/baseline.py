@@ -191,9 +191,6 @@ def get_rollout(train_state, config, save_dir=None):
         # Flatten observations for network input
         obs = {k: v.flatten() for k, v in obs.items()}
 
-        # print("agent_0 obs shape:", obs["agent_0"].shape)
-        # print("agent_1 obs shape:", obs["agent_1"].shape)
-
         # Get actions from policy for both agents
         pi_0, _ = network.apply(network_params, obs["agent_0"])
         pi_1, _ = network.apply(network_params, obs["agent_1"])
@@ -202,14 +199,9 @@ def get_rollout(train_state, config, save_dir=None):
             "agent_0": pi_0.sample(seed=key_a0), 
             "agent_1": pi_1.sample(seed=key_a1)
         }
-        # print("actions:", actions)
-        # env_act = unbatchify(action, env.agents, config["NUM_ENVS"], env.num_agents)
-        # env_act = {k: v.flatten() for k, v in env_act.items()}
 
         # Step environment forward
         obs, state, reward, done, info = env.step(key_s, state, actions)
-        # print("reward:", reward)
-        # print("shaped reward:", info["shaped_reward"])
         done = done["__all__"]
         rewards.append(reward['agent_0'])
         shaped_rewards.append(info["shaped_reward"]['agent_0'])
@@ -578,12 +570,6 @@ def make_train(config):
             # This function calculates the advantage for each transition in the trajectory (basically, policy optimization).
             # It returns the advantages and value targets.
             def _calculate_gae(traj_batch, last_val):
-                # Inner function that processes one transition at a time
-                # print(f"\nGAE Calculation Debug:")
-                # print("traj_batch types:", jax.tree_map(lambda x: x.dtype, traj_batch))
-                # print(f"traj_batch shapes:", jax.tree_map(lambda x: x.shape, traj_batch))
-                # print("last_val types:", jax.tree_map(lambda x: x.dtype, last_val))
-                # print(f"last_val shape: {last_val.shape}")
                 
                 # This function calculates the advantage for each transition in the trajectory.
                 def _get_advantages(gae_and_next_value, transition):
@@ -596,22 +582,10 @@ def make_train(config):
                         transition.reward,
                     )
 
-                    # Debug intermediate calculations
-                    # print(f"\nGAE step debug:")
-                    # print(f"done shape: {done.shape}")
-                    # print(f"value shape: {value.shape}")
-                    # print(f"reward shape: {reward.shape}")
-                    # print(f"next_value shape: {next_value.shape}")
-                    # print(f"gae shape: {gae.shape}")
-
                     # Calculate TD error (temporal difference)
                     # δt = rt + γV(st+1) - V(st)
                     delta = reward + config["GAMMA"] * next_value * (1 - done) - value
-                    # print(f"delta shape: {delta.shape}, value: {delta}")
 
-                    # Calculate GAE using the recursive formula:
-                    # At = δt + (γλ)At+1
-                    # (1 - done) ensures GAE is zero for terminal states
                     gae = (
                         delta
                         + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
@@ -629,12 +603,6 @@ def make_train(config):
                     reverse=True, # Process the trajectory backwards
                     unroll=16, # Unroll optimization
                 )
-                # Return advantages and value targets
-                # Value targets = advantages + value estimates
-                # Calculate returns (advantages + value estimates)
-                # print(f"\nFinal shapes:")
-                # print(f"advantages shape: {advantages.shape}")
-                # print(f"returns shape: {(advantages + traj_batch.value).shape}")
                 return advantages, advantages + traj_batch.value
 
             advantages, targets = _calculate_gae(traj_batch, last_val)
@@ -646,10 +614,6 @@ def make_train(config):
                 # advantages, and value targets for a single epoch.
                 def _update_minbatch(train_state, batch_info):
                     traj_batch, advantages, targets = batch_info
-                    # print("Minibatch shapes:")
-                    # print(f"traj_batch: {jax.tree_map(lambda x: x.shape, traj_batch)}")
-                    # print(f"advantages: {advantages.shape}")
-                    # print(f"targets: {targets.shape}")
 
                     def _loss_fn(params, traj_batch, gae, targets):
                         # print("\nCalculating losses...")
@@ -781,14 +745,6 @@ def make_train(config):
         return {"runner_state": runner_state, "metrics": metric}
 
     return train
-
-# Get absolute paths
-script_dir = Path(__file__).parent.absolute()
-project_root = script_dir.parent.parent.parent  # This should be the JaxMARL root
-
-# Add project root to Python path to ensure imports work
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
     
 @hydra.main(version_base=None, config_path="config", config_name="base_config")
 def main(hydra_config):
@@ -818,18 +774,6 @@ def main(hydra_config):
         name=f'bl_ff_ippo_oc_{config["ENV_KWARGS"]["layout"]}',
         # settings=wandb.Settings(start_method="thread"),
     )
-    
-    # # After wandb is initialized, we can access wandb.config regardless of how it was passed
-    # if wandb.run is not None:  # Check if we're actually running with wandb
-    #     sweep_params = ["LR", "ENT_COEF", "GAMMA", "NUM_STEPS", "CLIP_EPS"]
-    #     for param in sweep_params:
-    #         # wandb.config will contain the sweep parameters even if they were passed differently
-    #         if hasattr(wandb.config, param):
-    #             config[param] = getattr(wandb.config, param)
-    #             print(f"Updated {param} to {config[param]} from sweep")
-    
-    # # Now we can update wandb with our complete 
-    # wandb.config.update(config, allow_val_change=True) # True when making hyperparameter sweepings
     
     # Process layout configuration
     config["ENV_KWARGS"]["layout"] = overcooked_layouts[layout_name]

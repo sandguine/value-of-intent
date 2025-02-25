@@ -1,20 +1,20 @@
 # General Experiment Settings
 SEED: 30                              # Random seed for reproducibility
-NUM_SEEDS: 1                        # Default for hyperparameter tuning (use 100 for adaptability tests)
-# TRAINING_MODE: standard               # Options: adaptability, standard -> may implement this later
-LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250221/coord_ring/bl_ff_ippo_oc_coord_ring_20250221_124400_30
+NUM_SEEDS: 1                          # Default for hyperparameter tuning (use 100 for adaptability tests)
+# TRAINING_MODE: standard             # Options: adaptability, standard -> may implement this later
+LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250225/cramped_room/bl_ff_ippo_oc_cramped_room_20250225_093801_30
 
 # Environment Settings
 ENV_NAME: "overcooked"                # Environment used for training
 ENV_KWARGS: 
-  layout: "coord_ring"              # Overcooked layout (can be overridden during sweeps), make sure this match the file loaded in LOAD_PATH
+  layout: "cramped_room"              # Overcooked layout (can be overridden during sweeps), make sure this match the file loaded in LOAD_PATH
 
 ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
 
 # PPO Hyperparameters
 LR: 2.5e-4                            # Learning rate
 ANNEAL_LR: true                       # Whether to anneal the learning rate linearly over time
-NUM_ENVS: 16                           # Number of parallel environments for sample collection lower than baseline
+NUM_ENVS: 16                          # Number of parallel environments for sample collection lower than baseline
 NUM_STEPS: 128                        # Number of steps per environment before updating the policy
 TOTAL_TIMESTEPS: 5e7                  # Total timesteps to run the experiment (increased from previous 2.5e7)
 UPDATE_EPOCHS: 4                      # Number of update epochs per PPO iteration

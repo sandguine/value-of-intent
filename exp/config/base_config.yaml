@@ -1,6 +1,6 @@
 # General Experiment Settings
 SEED: 30                              # Random seed for reproducibility
-NUM_SEEDS: 16                        # Default for hyperparameter tuning (use 100 for adaptability tests)
+NUM_SEEDS: 16                         # Default for hyperparameter tuning (use 100 for adaptability tests)
 TRAINING_MODE: standard               # Options: adaptability, standard
 AGENT_TYPE: "baseline"                # Options: baseline, oracle
 SHARED_POLICY: true                   # Whether to use a shared policy for the agents
@@ -8,7 +8,7 @@ SHARED_POLICY: true                   # Whether to use a shared policy for the a
 # Environment Settings
 ENV_NAME: "overcooked"                # Environment used for training
 ENV_KWARGS: 
-  layout: "counter_circuit"              # Overcooked layout (can be overridden during sweeps)
+  layout: "cramped_room"              # Overcooked layout (can be overridden during sweeps)
 
 ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
 
@@ -27,10 +27,6 @@ ENT_COEF: 0.01                        # Entropy regularization coefficient (test
 VF_COEF: 0.5                          # Coefficient for value function loss
 MAX_GRAD_NORM: 0.5                    # Maximum gradient norm for clipping
 REW_SHAPING_HORIZON: 2.5e7            # Horizon for reward shaping
-
-# Results and Metrics
-RESULTS_DIR: "results"                # Directory to save results like metrics and learning curves
-LOG_INTERVAL: 1000                    # Log metrics every 1000 steps
 
 # WandB Integration
 ENTITY: "sandily"                     # WandB entity name (organization or user)

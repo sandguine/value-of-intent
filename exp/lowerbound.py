@@ -944,6 +944,15 @@ def main(config):
     print("Range of values:", np.min(reward_mean), np.max(reward_mean))
     reward_std = rewards.std(0)
     reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
+
+    # Log to wandb and metrics
+    wandb.log({"reward_mean": reward_mean})
+    wandb.log({"reward_std": reward_std})
+    wandb.log({"reward_std_err": reward_std_err})
+    out["metrics"]["reward_mean"] = reward_mean
+    out["metrics"]["reward_std"] = reward_std
+    out["metrics"]["reward_std_err"] = reward_std_err
+    
     plt.figure()
     plt.plot(reward_mean)
     plt.fill_between(range(len(reward_mean)), 

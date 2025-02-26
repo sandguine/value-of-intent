@@ -355,16 +355,6 @@ def save_training_results(save_dir, out, config, prefix=""):
         print("Warning: No seed-specific parameters were successfully processed")
 
 def load_training_results(load_dir, load_type="params"):
-    """
-    Load training results from pickle format
-    
-    Args:
-        load_dir: Directory containing saved files
-        prefix: Prefix used in filenames
-        load_type: Either "params" or "complete" to load just params or complete output
-    Returns:
-        Loaded data converted to JAX arrays where appropriate
-    """
     if load_type == "params":
         pickle_path = os.path.join(load_dir, f"params.pkl")
         if os.path.exists(pickle_path):
@@ -436,10 +426,6 @@ def make_train(config):
     
     env = LogWrapper(env, replace_info=False)
     
-    # Learning rate and reward shaping annealing schedules
-    # The learning rate is annealed linearly over the course of training because
-    # if the learning rate is too high, the model can diverge.
-    # By making the learning rate decay linearly, we can ensure that the model can converge.
     def linear_schedule(count):
         """Learning rate annealing schedule"""
         frac = 1.0 - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"])) / config["NUM_UPDATES"]

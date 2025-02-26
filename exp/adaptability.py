@@ -26,21 +26,19 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import wandb
 from typing import Dict, Any, Optional
-import yaml
+import traceback
 
 # Results saving imports
 import os
 import pickle
 from datetime import datetime
 from pathlib import Path
-import sys
-import random
+
 # Plotting imports
 import matplotlib.pyplot as plt
 
 # Helper imports
 from functools import partial
-import random
 
 class ActorCritic(nn.Module):
     action_dim: Sequence[int]  # Dimension of action space
@@ -121,14 +119,7 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
 
-# need to fix get_rollout, not being called currently
 def get_rollout(train_state, agent_1_params, config, save_dir=None):
-    """Generate a single episode rollout for visualization (Adaptability with Oracle Info).
-    
-    - Agent 1: Fixed partner using pretrained parameters.
-    - Agent 0: Observation augmented with Agent 1's sampled action (oracle one-step lookahead).
-    """
-
     # Initialize environment
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
 
@@ -138,10 +129,15 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
     key, key_r, key_a = jax.random.split(key, 3)
 
     # Initialize observation input shape
-    init_x = jnp.zeros(env.observation_space().shape).flatten()
+    init_x = jnp.zeros((1,) + env.observation_space().shape).flatten()
     network.init(key_a, init_x)
 
-    # Retrieve parameters
+    # Ensure using the first seed of first parallel env is selected if multiple seeds are present
+    agent_1_params = {
+        "params": jax.tree_util.tree_map(lambda x: x[0], agent_1_params["params"])
+    }
+
+    # Initialize agent_0 parameters (train_state) and retreive agent_1 parameters (pretrained)
     network_params_agent_0 = train_state.params
     network_params_agent_1 = agent_1_params
 
@@ -157,18 +153,20 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
 
         # Flatten observations for network input
         obs = {k: v.flatten() for k, v in obs.items()}
+        obs_agent_1 = obs["agent_1"][None, ...]
+        obs_agent_0 = obs["agent_0"][None, ...]
 
         # Agent 1, fixed partner, action sampling
         pi_1, _ = network.apply(network_params_agent_1, obs["agent_1"])
-        action_1 = pi_1.sample(seed=key_a1)
+        action_1 = jnp.squeeze(pi_1.sample(seed=key_a1))
 
         # Augment Agent 0's observation with Agent 1's action (oracle lookahead)
-        one_hot_action = jax.nn.one_hot(action_1, env.action_space().n)
-        augmented_obs_agent_0 = jnp.concatenate([obs["agent_0"], one_hot_action])
+        one_hot_action = jax.nn.one_hot(action_1, env.action_space().n)[None, ...]
+        augmented_obs_agent_0 = jnp.concatenate([obs_agent_0, one_hot_action], axis=1)
 
         # Agent 0 (learning agent) action from augmented observation
         pi_0, _ = network.apply(network_params_agent_0, augmented_obs_agent_0)
-        action_0 = pi_0.sample(seed=key_a0)
+        action_0 = jnp.squeeze(pi_0.sample(seed=key_a0))
 
         actions = {"agent_0": action_0, "agent_1": action_1}
 
@@ -379,10 +377,6 @@ def create_visualization(train_state, agent_1_params, config, filename, save_dir
     
     # Create visualization
     viz = OvercookedVisualizer()
-    
-    # Save with clean filename
-    if save_dir:
-        clean_filename = os.path.join(save_dir, clean_filename)
     viz.animate(state_seq, agent_view_size=agent_view_size, filename=filename)
 
 def make_train(config):
@@ -852,7 +846,8 @@ def main(config):
         create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
     except Exception as e:  
         print(f"Error generating visualization: {e}")
-    
+        traceback.print_exc()
+
     # Save parameters and results
     save_training_results(save_dir, out, config, prefix="op_ippo_oc_")
     np.savez(os.path.join(save_dir, "op_metrics.npz"), 
@@ -875,29 +870,40 @@ def main(config):
     reward_std = rewards.std(0)
     reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
 
-    # Log individual seed rewards
-    for update_step in range(rewards.shape[1]):
-        log_data = {"Update_Step": update_step}
+    if config["NUM_SEEDS"] > 1:
+        # Log individual seed rewards
+        for update_step in range(rewards.shape[1]):
+            log_data = {"Update_Step": update_step}
 
+            for seed_idx in range(config["NUM_SEEDS"]):
+                log_data[f"Seeds/Seed_{seed_idx}/Returned_Episode_Returns"] = rewards[seed_idx, update_step]
+
+            wandb.log(log_data)
+        
+        # Save learning curve locally
+        plt.figure()
+        plt.plot(reward_mean, label="Average Across All Seeds", color='black', linewidth=2)
+        plt.fill_between(range(len(reward_mean)), 
+                        reward_mean - reward_std_err,
+                        reward_mean + reward_std_err,
+                        alpha=0.2, color='gray', label="Mean ± Std Err")
         for seed_idx in range(config["NUM_SEEDS"]):
-            log_data[f"Seeds/Seed_{seed_idx}/Returned_Episode_Returns"] = rewards[seed_idx, update_step]
+            plt.plot(rewards[seed_idx], label=f'Seed {seed_idx}', alpha=0.7)
+        plt.xlabel("Update Step")
+        plt.ylabel("Returned Episode Returns")
+        plt.title("Per-Seed Performance on Returned Episode Returns")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid()
 
-        wandb.log(log_data)
-    
-    # Save learning curve locally
-    plt.figure()
-    plt.plot(reward_mean, label="Average Across All Seeds", color='black', linewidth=2)
-    plt.fill_between(range(len(reward_mean)), 
-                    reward_mean - reward_std_err,
-                    reward_mean + reward_std_err,
-                    alpha=0.2, color='gray', label="Mean ± Std Err")
-    for seed_idx in range(config["NUM_SEEDS"]):
-        plt.plot(rewards[seed_idx], label=f'Seed {seed_idx}', alpha=0.7)
-    plt.xlabel("Update Step")
-    plt.ylabel("Returned Episode Returns")
-    plt.title("Per-Seed Performance on Returned Episode Returns")
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.grid()
+    else:
+        # Save learning curve locally
+        plt.figure()
+        plt.plot(reward_mean, label="Mean Reward")
+        plt.xlabel("Update Step")
+        plt.ylabel("Returned Episode Returns")
+        plt.title("Lower Bound Learning Curve")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid()
     
     learning_curve_name = f"op_ippo_oc_learning_curve"
     plt.tight_layout()

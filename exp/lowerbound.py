@@ -172,7 +172,7 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
     init_x = jnp.zeros(env.observation_space().shape).flatten()
     network.init(key_a, init_x)
 
-    # Retrieve agent_0 parameters (train_state) and agent_1 parameters (pretrained)
+    # Initialize agent_0 parameters (train_state) and retreive agent_1 parameters (pretrained)
     network_params_agent_0 = train_state.params
     network_params_agent_1 = agent_1_params
 
@@ -208,11 +208,13 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
         state_seq.append(state)
 
     # Plot rewards for visualization
-    import matplotlib.pyplot as plt
-
-    plt.plot(rewards, label="reward")
-    plt.plot(shaped_rewards, label="shaped_reward")
+    plt.plot(rewards, label="reward", color='blue')
+    plt.plot(shaped_rewards, label="shaped_reward", color='orange')
     plt.legend()
+    plt.xlabel("Timestep")
+    plt.ylabel("Reward")
+    plt.title("Episode Reward and Shaped Reward Progression")
+    plt.grid()
     if save_dir:
         reward_plot_path = os.path.join(save_dir, "reward_plot.png")
     else:

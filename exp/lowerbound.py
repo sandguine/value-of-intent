@@ -873,10 +873,7 @@ def main(config):
     # Save parameters and results
     save_training_results(save_dir, out, config, prefix="lb_ippo_oc_")
     np.savez(os.path.join(save_dir, "lb_metrics.npz"), 
-             **{key: np.array(value) for key, value in out["metrics"].items()})
-    
-    save_training_results(save_dir, out, config, prefix="lb_ippo_oc_")
-    np.savez(os.path.join(save_dir, "metrics.npz"), **{key: np.array(value) for key, value in out["metrics"].items()})
+            **{key: np.array(value) for key, value in out["metrics"].items()})
     
     with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
         pickle.dump(config, f)

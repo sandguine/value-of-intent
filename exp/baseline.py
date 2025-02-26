@@ -741,7 +741,8 @@ def main(hydra_config):
     
     # Save results and generate visualizations
     save_training_results(save_dir, out, config, prefix="ub_ippo_oc_")
-    np.savez(os.path.join(save_dir, "metrics.npz"), **{key: np.array(value) for key, value in out["metrics"].items()})
+    np.savez(os.path.join(save_dir, "metrics.npz"), 
+            **{key: np.array(value) for key, value in out["metrics"].items()})
     
     with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
         pickle.dump(config, f)

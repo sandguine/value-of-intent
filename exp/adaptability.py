@@ -181,21 +181,21 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
         shaped_rewards.append(info["shaped_reward"]['agent_0'])
         state_seq.append(state)
 
-        # Plot rewards for visualization
-        plt.plot(rewards, label="reward", color='blue')
-        plt.plot(shaped_rewards, label="shaped_reward", color='orange')
-        plt.legend()
-        plt.xlabel("Timestep")
-        plt.ylabel("Reward")
-        plt.title("Episode Reward and Shaped Reward Progression")
-        plt.grid()
-        if save_dir:
-            reward_plot_path = os.path.join(save_dir, "reward_plot.png")
-        else:
-            reward_plot_path = "reward_plot.png"
-        plt.savefig(reward_plot_path)
-        plt.show()
-        plt.close()
+    # Plot rewards for visualization
+    plt.plot(rewards, label="reward", color='C0')
+    plt.plot(shaped_rewards, label="shaped_reward", color='C1')
+    plt.legend()
+    plt.xlabel("Timestep")
+    plt.ylabel("Reward")
+    plt.title("Episode Reward and Shaped Reward Progression")
+    plt.grid()
+    if save_dir:
+        reward_plot_path = os.path.join(save_dir, "reward_plot.png")
+    else:
+        reward_plot_path = "reward_plot.png"
+    plt.savefig(reward_plot_path)
+    plt.show()
+    plt.close()
 
     return state_seq
 
@@ -371,9 +371,8 @@ def load_training_results(load_dir, load_type="params", config=None):
 
 def create_visualization(train_state, agent_1_params, config, filename, save_dir=None, agent_view_size=5):
     """Helper function to create and save visualization"""
-    # Ensure we have a clean filename
-    base_name = os.path.splitext(os.path.basename(filename))[0]
-    clean_filename = f"{base_name}.gif"  # Force .gif extension
+    if not isinstance(config, dict):
+        config = OmegaConf.to_container(config, resolve=True)
     
     # Get the rollout
     state_seq = get_rollout(train_state, agent_1_params, config, save_dir)
@@ -384,7 +383,7 @@ def create_visualization(train_state, agent_1_params, config, filename, save_dir
     # Save with clean filename
     if save_dir:
         clean_filename = os.path.join(save_dir, clean_filename)
-    viz.animate(state_seq, agent_view_size=agent_view_size, filename=clean_filename)
+    viz.animate(state_seq, agent_view_size=agent_view_size, filename=filename)
 
 def make_train(config):
     # Initialize environment
@@ -721,25 +720,6 @@ def make_train(config):
             current_timestep = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
             metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
             metric["shaped_reward_annealed"] = metric["shaped_reward"]*rew_shaping_anneal(current_timestep)
-            
-            print("Reward Shape:", traj_batch.reward.shape)
-            print("Sample rewards (first step):", traj_batch.reward[0, :])
-            print("Sample rewards (first env across steps):", traj_batch.reward[:, 0])
-
-            rewards_per_env = traj_batch.reward.mean(axis=0)
-            overall_average = traj_batch.reward.mean()
-
-            mean_reward = jnp.mean(rewards_per_env)
-            overall_average = jnp.mean(overall_average)
-            std_reward = jnp.std(rewards_per_env)
-            min_reward = jnp.min(rewards_per_env)
-            max_reward = jnp.max(rewards_per_env)
-
-            metric["mean_reward"] = jax.device_get(mean_reward)
-            metric["overall_average"] = jax.device_get(overall_average)
-            metric["std_reward"] = jax.device_get(std_reward)
-            metric["min_reward"] = jax.device_get(min_reward)
-            metric["max_reward"] = jax.device_get(max_reward)
 
             rng = update_state[-1]
 
@@ -826,7 +806,7 @@ def main(config):
         tags=["IPPO", "FF", "Adaptability", "Oracle"],
         config=config,
         mode=config["WANDB_MODE"],
-        name=f'adaptability_{layout_name}'
+        name=f'op_ippo_oc_{layout_name}'
     )
 
     print("\nVerifying config before rollout:")
@@ -843,7 +823,7 @@ def main(config):
     config["ENV_KWARGS"]["layout"] = overcooked_layouts[layout_name]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
-    model_dir_name = f"adaptability_{layout_name}_{timestamp}"
+    model_dir_name = f"op_ippo_oc_{layout_name}_{timestamp}"
     save_dir = os.path.join(
         "saved_models", 
         date,
@@ -865,7 +845,7 @@ def main(config):
     out = jax.vmap(train_jit)(rngs)
 
     # Save parameters and results
-    save_training_results(save_dir, out, config, prefix="adaptability_")
+    save_training_results(save_dir, out, config, prefix="op_ippo_oc_")
     np.savez(os.path.join(save_dir, "op_metrics.npz"), 
              **{key: np.array(value) for key, value in out["metrics"].items()})
     
@@ -876,7 +856,7 @@ def main(config):
 
     # Generate and save visualization
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-    viz_base_name = f"adaptability_{layout_name}_{timestamp}"
+    viz_base_name = f"op_ippo_oc_{layout_name}"
     viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
     create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
     
@@ -886,35 +866,41 @@ def main(config):
 
     # Plot and save learning curves
     rewards = out["metrics"]["returned_episode_returns"].reshape((config["NUM_SEEDS"], -1))
-    print("Shape of rewards:", rewards.shape)
-    print("Values per seed:")
-    # for i in range(5):
-    #     print(f"Seed {i}:", rewards[i])
+
+    # Calculate mean and standard deviation of rewards across seeds
     reward_mean = rewards.mean(0)
-    # print("First few values of reward_mean:", reward_mean[:5])
-    print("Check for NaN:", np.isnan(reward_mean).any())
-    print("Range of values:", np.min(reward_mean), np.max(reward_mean))
     reward_std = rewards.std(0)
     reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
 
-    # Log to wandb and metrics
-    wandb.log({"reward_mean": reward_mean})
-    wandb.log({"reward_std": reward_std})
-    wandb.log({"reward_std_err": reward_std_err})
-    out["metrics"]["reward_mean"] = reward_mean
-    out["metrics"]["reward_std"] = reward_std
-    out["metrics"]["reward_std_err"] = reward_std_err
+    # Log individual seed rewards
+    for update_step in range(rewards.shape[1]):
+        log_data = {"Update_Step": update_step}
+        log_data["Rewards/Mean"] = reward_mean[update_step]
+        log_data["Rewards/Upper_Bound"] = reward_mean[update_step] + reward_std_err[update_step]
+        log_data["Rewards/Lower_Bound"] = reward_mean[update_step] - reward_std_err[update_step]
+
+        for seed_idx in range(config["NUM_SEEDS"]):
+            log_data[f"Seeds/Seed_{seed_idx}/Returned_Episode_Returns"] = rewards[seed_idx, update_step]
+
+        wandb.log(log_data)
     
+    # Save learning curve locally
     plt.figure()
-    plt.plot(reward_mean)
+    plt.plot(reward_mean, label="Average Across All Seeds", color='black', linewidth=2)
     plt.fill_between(range(len(reward_mean)), 
                     reward_mean - reward_std_err,
                     reward_mean + reward_std_err,
-                    alpha=0.2)
+                    alpha=0.2, color='gray', label="Mean ± Std Err")
+    for seed_idx in range(config["NUM_SEEDS"]):
+        plt.plot(rewards[seed_idx], label=f'Seed {seed_idx}', alpha=0.7)
     plt.xlabel("Update Step")
-    plt.ylabel("Average Return")
+    plt.ylabel("Returned Episode Returns")
+    plt.title("Per-Seed Performance on Returned Episode Returns")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid()
     
-    learning_curve_name = f"learning_curve_{layout_name}"
+    learning_curve_name = f"ub_ippo_oc_{config['ENV_NAME']}_learning_curve"
+    plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))
     plt.close()
 

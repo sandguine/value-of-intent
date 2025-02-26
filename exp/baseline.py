@@ -489,10 +489,6 @@ def make_train(config):
         obsv, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
         
         # TRAIN LOOP
-        # This function manages full update iteration including:
-        # - collecting trajectories in _env_step
-        # - calculating advantages in _calculate_gae
-        # - updating the network in _update_epoch
         def _update_step(runner_state, unused):
             # COLLECT TRAJECTORIES
             # This function handle single environment step and collets transitions
@@ -501,19 +497,9 @@ def make_train(config):
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
-
-                # print("Initial observation shapes:")
-                # print(f"agent_0 obs shape: {jax.tree_map(lambda x: x.shape, last_obs['agent_0'])}")
-                # print(f"agent_1 obs shape: {jax.tree_map(lambda x: x.shape, last_obs['agent_1'])}")
-
                 obs_batch = batchify(last_obs, env.agents, config["NUM_ACTORS"])
-
-                # print("obs_batch shape:", obs_batch.shape)
-                
                 pi, value = network.apply(train_state.params, obs_batch)
                 action = pi.sample(seed=_rng)
-                # print("action shape:", action.shape)
-                # print("action:", action)
                 log_prob = pi.log_prob(action)
                 env_act = unbatchify(action, env.agents, config["NUM_ENVS"], env.num_agents)
                 
@@ -527,19 +513,10 @@ def make_train(config):
                     rng_step, env_state, env_act
                 )
 
-                # print("reward:", reward)
-                # print("shaped reward:", info["shaped_reward"])
-
                 info["reward"] = reward["agent_0"]
 
                 current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
                 reward = jax.tree_util.tree_map(lambda x,y: x+y*rew_shaping_anneal(current_timestep), reward, info["shaped_reward"])
-
-                # print("Obs_batch shapes and dtypes:")
-                # print(jax.tree_map(lambda x: (x.shape, x.dtype), obs_batch))
-
-                # print("Obsv shapes and dtypes:")
-                # print(jax.tree_map(lambda x: (x.shape, x.dtype), obsv))
 
                 transition = Transition(
                     batchify(done, env.agents, config["NUM_ACTORS"]).squeeze(),
@@ -550,8 +527,6 @@ def make_train(config):
                     obs_batch,
                 )
                 runner_state = (train_state, env_state, obsv, update_step, rng)
-                # print("Runner state shapes and dtypes before updating next_obs:")
-                # print(jax.tree_map(lambda x: (x.shape, x.dtype), runner_state))
                 return runner_state, (transition, info)
 
             runner_state, (traj_batch, info) = jax.lax.scan(
@@ -703,21 +678,6 @@ def make_train(config):
             metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
             metric["shaped_reward_annealed"] = metric["shaped_reward"]*rew_shaping_anneal(current_timestep)
 
-            reward_per_env = traj_batch.reward.mean(axis=0)
-            overall_average = traj_batch.reward.mean()
-
-            mean_reward = jnp.mean(reward_per_env)
-            overall_average = jnp.mean(overall_average)
-            std_reward = jnp.std(reward_per_env)
-            min_reward = jnp.min(reward_per_env)
-            max_reward = jnp.max(reward_per_env)
-
-            metric["mean_reward"] = jax.device_get(mean_reward)
-            metric["overall_average"] = jax.device_get(overall_average)
-            metric["std_reward"] = jax.device_get(std_reward)
-            metric["min_reward"] = jax.device_get(min_reward)
-            metric["max_reward"] = jax.device_get(max_reward)
-
             rng = update_state[-1]
 
             def callback(metric):
@@ -769,6 +729,7 @@ def main(hydra_config):
         mode=config["WANDB_MODE"],
         name=f'ub_ippo_oc_{config["ENV_KWARGS"]["layout"]}',
         # settings=wandb.Settings(start_method="thread"),
+        # settings=wandb.Settings(code_dir=".", _disable_stats=True),
     )
     
     # Process layout configuration
@@ -816,13 +777,12 @@ def main(hydra_config):
     # Log individual seed rewards
     for update_step in range(rewards.shape[1]):
         log_data = {"Update_Step": update_step}
+        log_data["Rewards/Mean"] = reward_mean[update_step]
+        log_data["Rewards/Upper_Bound"] = reward_mean[update_step] + reward_std_err[update_step]
+        log_data["Rewards/Lower_Bound"] = reward_mean[update_step] - reward_std_err[update_step]
 
         for seed_idx in range(config["NUM_SEEDS"]):
-            log_data[f"Seed_{seed_idx}_Returned_Episode_Returns"] = rewards[seed_idx, update_step]
-
-        log_data["Mean_Returned_Episode_Return"] = reward_mean[update_step]
-        log_data["Mean_Return_Upper"] = reward_mean[update_step] + reward_std_err[update_step]
-        log_data["Mean_Return_Lower"] = reward_mean[update_step] - reward_std_err[update_step]
+            log_data[f"Seeds/Seed_{seed_idx}/Returned_Episode_Returns"] = rewards[seed_idx, update_step]
 
         wandb.log(log_data)
     

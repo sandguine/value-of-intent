@@ -158,8 +158,6 @@ def get_rollout(train_state, config, save_dir=None):
     """Generate a single episode rollout for visualization"""
     # Initialize environment
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
-    # env_params = env.default_params
-    # env = LogWrapper(env)
 
     # Initialize network
     network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"])
@@ -185,9 +183,6 @@ def get_rollout(train_state, config, save_dir=None):
     while not done:
         key, key_a0, key_a1, key_s = jax.random.split(key, 4)
 
-        # obs_batch = batchify(obs, env.agents, config["NUM_ACTORS"])
-        # breakpoint()
-
         # Flatten observations for network input
         obs = {k: v.flatten() for k, v in obs.items()}
 
@@ -209,19 +204,20 @@ def get_rollout(train_state, config, save_dir=None):
         state_seq.append(state)
 
     # Plot rewards for visualization
-    from matplotlib import pyplot as plt
-
-    plt.plot(rewards, label="reward")
-    plt.plot(shaped_rewards, label="shaped_reward")
+    plt.plot(rewards, label="reward", color='C0')
+    plt.plot(shaped_rewards, label="shaped_reward", color='C1')
     plt.legend()
+    plt.xlabel("Timestep")
+    plt.ylabel("Reward")
+    plt.title("Episode Reward and Shaped Reward Progression")
+    plt.grid()
     if save_dir:
         reward_plot_path = os.path.join(save_dir, "reward_plot.png")
     else:
         reward_plot_path = "reward_plot.png"
     plt.savefig(reward_plot_path)
-    plt.close()
-    plt.savefig(reward_plot_path)
     plt.show()
+    plt.close()
 
     return state_seq
 
@@ -768,10 +764,10 @@ def main(hydra_config):
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
-        tags=["IPPO", "FF", "Baseline", "Oracle"],
+        tags=["IPPO", "FF", "Baseline", "Oracle", "Upper Bound"],
         config=config,  # Pass initial config
         mode=config["WANDB_MODE"],
-        name=f'bl_ff_ippo_oc_{config["ENV_KWARGS"]["layout"]}',
+        name=f'ub_ippo_oc_{config["ENV_KWARGS"]["layout"]}',
         # settings=wandb.Settings(start_method="thread"),
     )
     
@@ -781,7 +777,7 @@ def main(hydra_config):
     # Create results directory with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
-    model_dir_name = f"bl_ff_ippo_oc_{layout_name}_{timestamp}"
+    model_dir_name = f"ub_ippo_oc_{layout_name}_{timestamp}"
     save_dir = os.path.join(
         "saved_models", 
         date,
@@ -795,12 +791,9 @@ def main(hydra_config):
     rngs = jax.random.split(rng, config["NUM_SEEDS"])    
     train_jit = jax.jit(make_train(config))
     out = jax.vmap(train_jit)(rngs)
-
-    # with open(os.path.join(save_dir, "params.pkl"), 'wb') as f:
-    #     pickle.dump(out["runner_state"].params, f)
     
     # Save results and generate visualizations
-    save_training_results(save_dir, out, config, prefix="bl_ff_ippo_oc_")
+    save_training_results(save_dir, out, config, prefix="ub_ippo_oc_")
     np.savez(os.path.join(save_dir, "metrics.npz"), **{key: np.array(value) for key, value in out["metrics"].items()})
     
     with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
@@ -808,26 +801,48 @@ def main(hydra_config):
         
     # Create and save visualization
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-    viz_base_name = f"bl_ff_ippo_oc_{layout_name}_{timestamp}"
+    viz_base_name = f"ub_ippo_oc_{layout_name}_{timestamp}"
     viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
     create_visualization(train_state, config, viz_filename, save_dir)
     
     # Plot and save learning curves
     rewards = out["metrics"]["returned_episode_returns"].reshape((config["NUM_SEEDS"], -1))
+
+    # Calculate mean and standard deviation of rewards across seeds
     reward_mean = rewards.mean(0)
     reward_std = rewards.std(0)
     reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
+
+    # Log individual seed rewards
+    for update_step in range(rewards.shape[1]):
+        log_data = {"Update_Step": update_step}
+
+        for seed_idx in range(config["NUM_SEEDS"]):
+            log_data[f"Seed_{seed_idx}_Returned_Episode_Returns"] = rewards[seed_idx, update_step]
+
+        log_data["Mean_Returned_Episode_Return"] = reward_mean[update_step]
+        log_data["Mean_Return_Upper"] = reward_mean[update_step] + reward_std_err[update_step]
+        log_data["Mean_Return_Lower"] = reward_mean[update_step] - reward_std_err[update_step]
+
+        wandb.log(log_data)
     
+    # Save learning curve locally
     plt.figure()
-    plt.plot(reward_mean)
+    plt.plot(reward_mean, label="Average Across All Seeds", color='black', linewidth=2)
     plt.fill_between(range(len(reward_mean)), 
                     reward_mean - reward_std_err,
                     reward_mean + reward_std_err,
-                    alpha=0.2)
+                    alpha=0.2, color='gray', label="Mean ± Std Err")
+    for seed_idx in range(config["NUM_SEEDS"]):
+        plt.plot(rewards[seed_idx], label=f'Seed {seed_idx}', alpha=0.7)
     plt.xlabel("Update Step")
-    plt.ylabel("Return")
+    plt.ylabel("Returned Episode Returns")
+    plt.title("Per-Seed Performance on Returned Episode Returns")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid()
     
-    learning_curve_name = f"{config['ENV_NAME']}_learning_curve"
+    learning_curve_name = f"ub_ippo_oc_{config['ENV_NAME']}_learning_curve"
+    plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))
     plt.close()
 

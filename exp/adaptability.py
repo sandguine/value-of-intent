@@ -123,77 +123,81 @@ class Transition(NamedTuple):
 
 # need to fix get_rollout, not being called currently
 def get_rollout(train_state, agent_1_params, config, save_dir=None):
+    """Generate a single episode rollout for visualization (Adaptability with Oracle Info).
+    
+    - Agent 1: Fixed partner using pretrained parameters.
+    - Agent 0: Observation augmented with Agent 1's sampled action (oracle one-step lookahead).
+    """
+
+    # Initialize environment
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
 
+    # Initialize network
     network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"])
     key = jax.random.PRNGKey(0)
-    key, key_a, key_r = jax.random.split(key, 3)
+    key, key_r, key_a = jax.random.split(key, 3)
 
-    init_x = jnp.zeros(env.observation_space().shape)
-    init_x = init_x.flatten()
-
+    # Initialize observation input shape
+    init_x = jnp.zeros(env.observation_space().shape).flatten()
     network.init(key_a, init_x)
-    network_params = train_state.params
 
-    # Reset environment before using obs
+    # Retrieve parameters
+    network_params_agent_0 = train_state.params
+    network_params_agent_1 = agent_1_params
+
+    done = False
     obs, state = env.reset(key_r)
-
     state_seq = [state]
     rewards = []
     shaped_rewards = []
 
-    done = False
-
+    # Run episode until completion
     while not done:
         key, key_a0, key_a1, key_s = jax.random.split(key, 4)
 
-        # Ensure agent_1 receives the correct observations
-        agent_1_obs = obs["agent_1"].reshape(-1)
+        # Flatten observations for network input
+        obs = {k: v.flatten() for k, v in obs.items()}
 
-        if is_shared_params:
-            pi_1, _ = network.apply(train_state.params, agent_1_obs)  # Use shared params
-        else:
-            pi_1, _ = network.apply(agent_1_params, agent_1_obs)
-
+        # Agent 1, fixed partner, action sampling
+        pi_1, _ = network.apply(network_params_agent_1, obs["agent_1"])
         action_1 = pi_1.sample(seed=key_a1)
 
-        # Ensure agent_0 receives correctly formatted observations
-        agent_0_obs = obs["agent_0"].reshape(-1)
+        # Augment Agent 0's observation with Agent 1's action (oracle lookahead)
+        one_hot_action = jax.nn.one_hot(action_1, env.action_space().n)
+        augmented_obs_agent_0 = jnp.concatenate([obs["agent_0"], one_hot_action])
 
-        if config.get("AUGMENT_OBS", False):  # Match augmentation logic in training
-            one_hot_action = jax.nn.one_hot(action_1, env.action_space().n)
-            agent_0_obs = jnp.concatenate([agent_0_obs, one_hot_action])
-
-        pi_0, _ = network.apply(train_state.params, agent_0_obs)
+        # Agent 0 (learning agent) action from augmented observation
+        pi_0, _ = network.apply(network_params_agent_0, augmented_obs_agent_0)
         action_0 = pi_0.sample(seed=key_a0)
 
-        actions = {
-            "agent_0": action_0,
-            "agent_1": action_1
-        }
+        actions = {"agent_0": action_0, "agent_1": action_1}
 
+        # Step environment forward
         obs, state, reward, done, info = env.step(key_s, state, actions)
-        done = done["agent_0"]  # Ensure we track `agent_0`'s termination condition
+        done = done["__all__"]
 
+        # Track rewards
         rewards.append(reward['agent_0'])
         shaped_rewards.append(info["shaped_reward"]['agent_0'])
-
         state_seq.append(state)
 
-    # Save reward plot if directory is provided
-    plt.plot(rewards, label="reward")
-    plt.plot(shaped_rewards, label="shaped_reward")
-    plt.legend()
-    if save_dir:
-        plt.savefig(os.path.join(save_dir, "reward_plot.png"))
-    plt.close()
+        # Plot rewards for visualization
+        plt.plot(rewards, label="reward", color='blue')
+        plt.plot(shaped_rewards, label="shaped_reward", color='orange')
+        plt.legend()
+        plt.xlabel("Timestep")
+        plt.ylabel("Reward")
+        plt.title("Episode Reward and Shaped Reward Progression")
+        plt.grid()
+        if save_dir:
+            reward_plot_path = os.path.join(save_dir, "reward_plot.png")
+        else:
+            reward_plot_path = "reward_plot.png"
+        plt.savefig(reward_plot_path)
+        plt.show()
+        plt.close()
 
-    # Return rollout data for further analysis
-    return {
-        "state_seq": state_seq,
-        "rewards": rewards,
-        "shaped_rewards": shaped_rewards
-    }
+    return state_seq
 
 def batchify(x: dict, agent_list, num_actors):
     x = jnp.stack([x[a] for a in agent_list])
@@ -874,7 +878,7 @@ def main(config):
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
     viz_base_name = f"adaptability_{layout_name}_{timestamp}"
     viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
-    # create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
+    create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
     
     print('** Saving Results **')
     print("Original shape:", out["metrics"]["returned_episode_returns"].shape)

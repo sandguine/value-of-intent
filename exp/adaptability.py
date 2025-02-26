@@ -844,6 +844,15 @@ def main(config):
     train_jit = jax.jit(lambda rng: train_fn(rng, pretrained_params))
     out = jax.vmap(train_jit)(rngs)
 
+    # Generate and save visualization
+    try:
+        train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
+        viz_base_name = f"op_ippo_oc_{layout_name}"
+        viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
+        create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
+    except Exception as e:  
+        print(f"Error generating visualization: {e}")
+    
     # Save parameters and results
     save_training_results(save_dir, out, config, prefix="op_ippo_oc_")
     np.savez(os.path.join(save_dir, "op_metrics.npz"), 
@@ -853,12 +862,6 @@ def main(config):
         pickle.dump(config, f)
 
     print(f"Training results saved to: {save_dir}")
-
-    # Generate and save visualization
-    train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-    viz_base_name = f"op_ippo_oc_{layout_name}"
-    viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
-    create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
     
     print('** Saving Results **')
     print("Original shape:", out["metrics"]["returned_episode_returns"].shape)
@@ -875,9 +878,6 @@ def main(config):
     # Log individual seed rewards
     for update_step in range(rewards.shape[1]):
         log_data = {"Update_Step": update_step}
-        log_data["Rewards/Mean"] = reward_mean[update_step]
-        log_data["Rewards/Upper_Bound"] = reward_mean[update_step] + reward_std_err[update_step]
-        log_data["Rewards/Lower_Bound"] = reward_mean[update_step] - reward_std_err[update_step]
 
         for seed_idx in range(config["NUM_SEEDS"]):
             log_data[f"Seeds/Seed_{seed_idx}/Returned_Episode_Returns"] = rewards[seed_idx, update_step]
@@ -899,7 +899,7 @@ def main(config):
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.grid()
     
-    learning_curve_name = f"ub_ippo_oc_{config['ENV_NAME']}_learning_curve"
+    learning_curve_name = f"op_ippo_oc_learning_curve"
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))
     plt.close()

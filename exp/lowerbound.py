@@ -27,21 +27,19 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import wandb
 from typing import Dict, Any, Optional
-import yaml
+import traceback
 
 # Results saving imports
 import os
 import pickle
 from datetime import datetime
 from pathlib import Path
-import sys
-import random
+
 # Plotting imports
 import matplotlib.pyplot as plt
 
 # Helper imports
 from functools import partial
-import random
 
 class ActorCritic(nn.Module):
     """Neural network architecture implementing both policy (actor) and value function (critic)
@@ -172,9 +170,10 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
     init_x = jnp.zeros((1,) + env.observation_space().shape).flatten()
     network.init(key_a, init_x)
 
-    # Ensure using the first seed if multiple seeds are present
-    if isinstance(agent_1_params, list) or hasattr(agent_1_params, '__getitem__'):
-        agent_1_params = agent_1_params[0]  # Select seed_0
+    # Ensure using the first seed of first parallel env is selected if multiple seeds are present
+    agent_1_params = {
+        "params": jax.tree_util.tree_map(lambda x: x[0], agent_1_params["params"])
+    }
 
     # Initialize agent_0 parameters (train_state) and retreive agent_1 parameters (pretrained)
     network_params_agent_0 = train_state.params
@@ -232,28 +231,10 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
     return state_seq
 
 def batchify(x: dict, agent_list, num_actors):
-    """Converts individual agent observations into a batched tensor."""
     x = jnp.stack([x[a] for a in agent_list])
     return x.reshape((num_actors, -1))
 
 def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
-    """
-    Splits a batched tensor of observations into individual agent observations.
-
-    Args:
-        x (jnp.ndarray): A batched tensor of shape `(num_actors, num_envs, -1)`.
-        agent_list (list): List of agent identifiers corresponding to the observations.
-        num_envs (int): Number of parallel environments.
-        num_actors (int): Number of actors (e.g., agents or agent-environment pairs).
-
-    Returns:
-        dict: A dictionary mapping agent identifiers to their respective observations.
-
-    Purpose:
-    - Converts batched observations back into individual agent-specific observations 
-    for environment interactions.
-    - Maintains compatibility between network outputs and environment inputs.
-    """
     x = x.reshape((num_actors, num_envs, -1)) # This reshapes the observation space to a 3D array with the shape (num_actors, num_envs, -1)
     return {a: x[i] for i, a in enumerate(agent_list)} # This returns the observation space for the agents
 
@@ -401,7 +382,7 @@ def load_training_results(load_dir, load_type="params", config=None):
 
             print("Successfully loaded pretrained model.")
             print("Loaded params type:", type(sampled_params))  # Should be <FrozenDict>
-            # print("Shape of sampled_params:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params))
+            print("Shape of sampled_params:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params))
 
             return sampled_params
                 
@@ -429,10 +410,6 @@ def create_visualization(train_state, agent_1_params, config, filename, save_dir
     
     # Create visualization
     viz = OvercookedVisualizer()
-    
-    # Save with clean filename
-    if save_dir:
-        clean_filename = os.path.join(save_dir, clean_filename)
     viz.animate(state_seq, agent_view_size=agent_view_size, filename=filename)
 
 def make_train(config):
@@ -891,6 +868,7 @@ def main(config):
         create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
     except Exception as e:  
         print(f"Error generating visualization: {e}")
+        traceback.print_exc()
 
     # Save parameters and results
     save_training_results(save_dir, out, config, prefix="lb_ippo_oc_")
@@ -911,30 +889,41 @@ def main(config):
     reward_std = rewards.std(0)
     reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
 
-    # Log individual seed rewards
-    for update_step in range(rewards.shape[1]):
-        log_data = {"Update_Step": update_step}
+    if config["NUM_SEEDS"] > 1:
+        # Log individual seed rewards
+        for update_step in range(rewards.shape[1]):
+            log_data = {"Update_Step": update_step}
 
+            for seed_idx in range(config["NUM_SEEDS"]):
+                log_data[f"Seeds/Seed_{seed_idx}/Returned_Episode_Returns"] = rewards[seed_idx, update_step]
+
+            wandb.log(log_data)
+        
+        # Save learning curve locally
+        plt.figure()
+        plt.plot(reward_mean, label="Average Across All Seeds", color='black', linewidth=2)
+        plt.fill_between(range(len(reward_mean)), 
+                        reward_mean - reward_std_err,
+                        reward_mean + reward_std_err,
+                        alpha=0.2, color='gray', label="Mean ± Std Err")
         for seed_idx in range(config["NUM_SEEDS"]):
-            log_data[f"Seeds/Seed_{seed_idx}/Returned_Episode_Returns"] = rewards[seed_idx, update_step]
+            plt.plot(rewards[seed_idx], label=f'Seed {seed_idx}', alpha=0.7)
+        plt.xlabel("Update Step")
+        plt.ylabel("Returned Episode Returns")
+        plt.title("Per-Seed Performance on Returned Episode Returns")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid()
+        
+    else:
+        # Save learning curve locally
+        plt.figure()
+        plt.plot(reward_mean, label="Mean Reward")
+        plt.xlabel("Update Step")
+        plt.ylabel("Returned Episode Returns")
+        plt.title("Lower Bound Learning Curve")
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid()
 
-        wandb.log(log_data)
-    
-    # Save learning curve locally
-    plt.figure()
-    plt.plot(reward_mean, label="Average Across All Seeds", color='black', linewidth=2)
-    plt.fill_between(range(len(reward_mean)), 
-                    reward_mean - reward_std_err,
-                    reward_mean + reward_std_err,
-                    alpha=0.2, color='gray', label="Mean ± Std Err")
-    for seed_idx in range(config["NUM_SEEDS"]):
-        plt.plot(rewards[seed_idx], label=f'Seed {seed_idx}', alpha=0.7)
-    plt.xlabel("Update Step")
-    plt.ylabel("Returned Episode Returns")
-    plt.title("Per-Seed Performance on Returned Episode Returns")
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.grid()
-    
     learning_curve_name = f"lb_ippo_oc_learning_curve"
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))

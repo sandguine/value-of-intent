@@ -1,25 +1,27 @@
 # General Experiment Settings
 SEED: 30                              # Random seed for reproducibility
-NUM_SEEDS: 16                        # Default for hyperparameter tuning (use 100 for adaptability tests)
+NUM_SEEDS: 16                         # Default for hyperparameter tuning (use 100 for adaptability tests)
+# TRAINING_MODE: standard             # Options: adaptability, standard -> may implement this later
+LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250227/coord_ring/ub_ippo_oc_coord_ring_20250227_011445_30
 
 # Environment Settings
 ENV_NAME: "overcooked"                # Environment used for training
 ENV_KWARGS: 
-  layout : "asymm_advantages"          # Overcooked layout: cramped_room, asymm_advantages, counter_circuit, coord_ring, forced_coord
+  layout: "coord_ring"                # Overcooked layout (can be overridden during sweeps), make sure this match the file loaded in LOAD_PATH
 
 ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
 
 # PPO Hyperparameters
-LR: 0.000025                          # changed from 2.5e-4 to 0.0001
+LR: 0.00005                           # Learning rate
 ANNEAL_LR: true                       # Whether to anneal the learning rate linearly over time
-NUM_ENVS: 128                         # Number of parallel environments for sample collection
+NUM_ENVS: 128                         # Number of parallel environments for sample collection lower than baseline
 NUM_STEPS: 128                        # Number of steps per environment before updating the policy
-TOTAL_TIMESTEPS: 4e8                  # This has to be larger than NUM_STEPS in adaptability.yaml to do direct comparison
+TOTAL_TIMESTEPS: 4e8                  # 5e7 for lb and op, 4e8 for ub
 UPDATE_EPOCHS: 4                      # Number of update epochs per PPO iteration
 NUM_MINIBATCHES: 4                    # Number of minibatches to split each batch during training
-GAMMA: 0.98                           # Discount factor for rewards
+GAMMA: 0.99                           # Discount factor for rewards
 GAE_LAMBDA: 0.95                      # Lambda for Generalized Advantage Estimation
-CLIP_EPS: 0.1                         # Clipping epsilon for PPO
+CLIP_EPS: 0.2                         # Clipping epsilon for PPO
 ENT_COEF: 0.02                        # Entropy regularization coefficient (test between 0.01 and 0.05)
 VF_COEF: 0.5                          # Coefficient for value function loss
 MAX_GRAD_NORM: 0.5                    # Maximum gradient norm for clipping
@@ -27,5 +29,5 @@ REW_SHAPING_HORIZON: 2.5e7            # Horizon for reward shaping
 
 # WandB Integration
 ENTITY: "sandily"                     # WandB entity name (organization or user)
-PROJECT: "comparisons"                # WandB project name
+PROJECT: "comparisons"                 # WandB project name
 WANDB_MODE: "online"                  # WandB mode (online, offline, disabled)

@@ -12,11 +12,11 @@ ENV_KWARGS:
 ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
 
 # PPO Hyperparameters
-LR: 0.000025                            # Learning rate
+LR: 0.000025                          # Learning rate
 ANNEAL_LR: true                       # Whether to anneal the learning rate linearly over time
 NUM_ENVS: 16                          # Number of parallel environments for sample collection lower than baseline
 NUM_STEPS: 128                        # Number of steps per environment before updating the policy
-TOTAL_TIMESTEPS: 5e7                  # Total timesteps to run the experiment (increased from previous 2.5e7)
+TOTAL_TIMESTEPS: 5e7                  # 5e7 for lb and op, 4e8 for ub
 UPDATE_EPOCHS: 4                      # Number of update epochs per PPO iteration
 NUM_MINIBATCHES: 4                    # Number of minibatches to split each batch during training
 GAMMA: 0.98                           # Discount factor for rewards

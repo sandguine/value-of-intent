@@ -19,10 +19,10 @@ NUM_STEPS: 128                        # Number of steps per environment before u
 TOTAL_TIMESTEPS: 4e8                  # 5e7 for lb and op, 4e8 for ub
 UPDATE_EPOCHS: 4                      # Number of update epochs per PPO iteration
 NUM_MINIBATCHES: 4                    # Number of minibatches to split each batch during training
-GAMMA: 0.99                           # Discount factor for rewards
+GAMMA: 0.99                           # 0.99 or 0.98 seem to both work okay
 GAE_LAMBDA: 0.95                      # Lambda for Generalized Advantage Estimation
 CLIP_EPS: 0.2                         # Clipping epsilon for PPO
-ENT_COEF: 0.02                        # Entropy regularization coefficient (test between 0.01 and 0.05)
+ENT_COEF: 0.02                        # 0.02 or 0.05 seem to both work okay
 VF_COEF: 0.5                          # Coefficient for value function loss
 MAX_GRAD_NORM: 0.5                    # Maximum gradient norm for clipping
 REW_SHAPING_HORIZON: 2.5e7            # Horizon for reward shaping

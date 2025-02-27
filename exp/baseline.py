@@ -688,7 +688,7 @@ def make_train(config):
 
     return train
     
-@hydra.main(version_base=None, config_path="config", config_name="base_config")
+@hydra.main(version_base=None, config_path="config", config_name="asymm_config")
 def main(hydra_config):
     """
     Main entry point for training that handles path setup, configuration management,

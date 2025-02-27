@@ -1,33 +1,32 @@
 # General Experiment Settings
-SEED: 30                              # Random seed for reproducibility
-NUM_SEEDS: 16                          # Default for hyperparameter tuning (use 100 for adaptability tests)
-# TRAINING_MODE: standard             # Options: adaptability, standard -> may implement this later
+SEED: 30                              
+NUM_SEEDS: 16                         
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250225/cramped_room/ub_ippo_oc_cramped_room_20250225_173039_30
 
 # Environment Settings
-ENV_NAME: "overcooked"                # Environment used for training
+ENV_NAME: "overcooked"                
 ENV_KWARGS: 
-  layout: "cramped_room"              # Overcooked layout (can be overridden during sweeps), make sure this match the file loaded in LOAD_PATH
+  layout: "cramped_room"             
 
-ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
+ACTIVATION: "tanh"                    # tanh or relu
 
 # PPO Hyperparameters
-LR: 2.5e-4                            # Learning rate
-ANNEAL_LR: true                       # Whether to anneal the learning rate linearly over time
-NUM_ENVS: 16                          # Number of parallel environments for sample collection lower than baseline
-NUM_STEPS: 128                        # Number of steps per environment before updating the policy
-TOTAL_TIMESTEPS: 5e7                  # Total timesteps to run the experiment (increased from previous 2.5e7)
-UPDATE_EPOCHS: 4                      # Number of update epochs per PPO iteration
-NUM_MINIBATCHES: 4                    # Number of minibatches to split each batch during training
-GAMMA: 0.99                           # Discount factor for rewards
-GAE_LAMBDA: 0.95                      # Lambda for Generalized Advantage Estimation
-CLIP_EPS: 0.2                         # Clipping epsilon for PPO
-ENT_COEF: 0.01                        # Entropy regularization coefficient (test between 0.01 and 0.05)
-VF_COEF: 0.5                          # Coefficient for value function loss
-MAX_GRAD_NORM: 0.5                    # Maximum gradient norm for clipping
-REW_SHAPING_HORIZON: 2.5e7            # Horizon for reward shaping
+LR: 2.5e-4                           
+ANNEAL_LR: true                       
+NUM_ENVS: 16                          
+NUM_STEPS: 128                        
+TOTAL_TIMESTEPS: 5e7                  # 5e7 for lb and op, 4e8 for ub
+UPDATE_EPOCHS: 4                     
+NUM_MINIBATCHES: 4                    
+GAMMA: 0.99                           
+GAE_LAMBDA: 0.95                      
+CLIP_EPS: 0.2                        
+ENT_COEF: 0.01                        
+VF_COEF: 0.5                          
+MAX_GRAD_NORM: 0.5                    
+REW_SHAPING_HORIZON: 2.5e7            
 
 # WandB Integration
-ENTITY: "sandily"                     # WandB entity name (organization or user)
-PROJECT: "comparisons"                 # WandB project name
-WANDB_MODE: "online"                  # WandB mode (online, offline, disabled)
+ENTITY: "sandily"                     
+PROJECT: "comparisons"                
+WANDB_MODE: "online"                  

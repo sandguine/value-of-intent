@@ -779,7 +779,7 @@ def make_train(config):
 
     return train
 
-@hydra.main(version_base=None, config_path="config", config_name="adaptability")
+@hydra.main(version_base=None, config_path="config", config_name="adapt_asymm")
 def main(config):
 
     # Validate config

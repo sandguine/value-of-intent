@@ -14,9 +14,9 @@ ACTIVATION: "tanh"                    # Activation function for the network (tan
 # PPO Hyperparameters
 LR: 0.00005                           # Learning rate
 ANNEAL_LR: true                       # Whether to anneal the learning rate linearly over time
-NUM_ENVS: 128                         # Number of parallel environments for sample collection lower than baseline
+NUM_ENVS: 16                          # 128 for ub, 16 for lb and op
 NUM_STEPS: 128                        # Number of steps per environment before updating the policy
-TOTAL_TIMESTEPS: 4e8                  # 5e7 for lb and op, 4e8 for ub
+TOTAL_TIMESTEPS: 5e7                  # 5e7 for lb and op, 4e8 for ub
 UPDATE_EPOCHS: 4                      # Number of update epochs per PPO iteration
 NUM_MINIBATCHES: 4                    # Number of minibatches to split each batch during training
 GAMMA: 0.99                           # 0.99 or 0.98 seem to both work okay

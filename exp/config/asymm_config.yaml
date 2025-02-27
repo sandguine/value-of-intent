@@ -27,5 +27,5 @@ REW_SHAPING_HORIZON: 2.5e7            # Horizon for reward shaping
 
 # WandB Integration
 ENTITY: "sandily"                     # WandB entity name (organization or user)
-PROJECT: "comparisons"                 # WandB project name
+PROJECT: "comparisons"                # WandB project name
 WANDB_MODE: "online"                  # WandB mode (online, offline, disabled)

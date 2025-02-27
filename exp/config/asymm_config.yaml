@@ -10,7 +10,7 @@ ENV_KWARGS:
 ACTIVATION: "tanh"                    # Activation function for the network (tanh or relu)
 
 # PPO Hyperparameters
-LR: 0.0001                            # changed from 2.5e-4 to 0.0001
+LR: 0.000025                          # changed from 2.5e-4 to 0.0001
 ANNEAL_LR: true                       # Whether to anneal the learning rate linearly over time
 NUM_ENVS: 128                         # Number of parallel environments for sample collection
 NUM_STEPS: 128                        # Number of steps per environment before updating the policy
@@ -20,7 +20,7 @@ NUM_MINIBATCHES: 4                    # Number of minibatches to split each batc
 GAMMA: 0.98                           # Discount factor for rewards
 GAE_LAMBDA: 0.95                      # Lambda for Generalized Advantage Estimation
 CLIP_EPS: 0.1                         # Clipping epsilon for PPO
-ENT_COEF: 0.01                        # Entropy regularization coefficient (test between 0.01 and 0.05)
+ENT_COEF: 0.02                        # Entropy regularization coefficient (test between 0.01 and 0.05)
 VF_COEF: 0.5                          # Coefficient for value function loss
 MAX_GRAD_NORM: 0.5                    # Maximum gradient norm for clipping
 REW_SHAPING_HORIZON: 2.5e7            # Horizon for reward shaping

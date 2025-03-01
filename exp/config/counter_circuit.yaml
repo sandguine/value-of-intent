@@ -1,7 +1,7 @@
 # General Experiment Settings
 SEED: 30                              
-NUM_SEEDS: 16                         
-LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250226/asymm_advantages/ub_ippo_oc_asymm_advantages_20250226_211907_30
+NUM_SEEDS: 128                         
+LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250228/counter_circuit/ub_ippo_oc_counter_circuit_20250228_121323_30/
 
 # Environment Settings
 ENV_NAME: "overcooked"                
@@ -13,7 +13,7 @@ ACTIVATION: "tanh"                    # tanh or relu
 # PPO Hyperparameters
 LR: 0.0001                          
 ANNEAL_LR: true                       
-NUM_ENVS: 128                          # 128 for ub, 16 for lb and op
+NUM_ENVS: 128                         # 128 for ub
 NUM_STEPS: 128                        
 TOTAL_TIMESTEPS: 4e8                  # 5e7 for lb and op, 4e8 for ub
 UPDATE_EPOCHS: 4                      

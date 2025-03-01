@@ -1,6 +1,6 @@
 # General Experiment Settings
 SEED: 30                              
-NUM_SEEDS: 16                         
+NUM_SEEDS: 128                         
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250225/cramped_room/ub_ippo_oc_cramped_room_20250225_173039_30
 
 # Environment Settings
@@ -13,7 +13,7 @@ ACTIVATION: "tanh"                    # tanh or relu
 # PPO Hyperparameters
 LR: 2.5e-4                           
 ANNEAL_LR: true                       
-NUM_ENVS: 16                          
+NUM_ENVS: 128                          
 NUM_STEPS: 128                        
 TOTAL_TIMESTEPS: 5e7                  # 5e7 for lb and op, 4e8 for ub
 UPDATE_EPOCHS: 4                     

@@ -21,3 +21,6 @@ slurm/
 .venv/
 requirements.txt
 requirements.in
+
+# excluded saved_models/ folder since pop training is large
+saved_models/

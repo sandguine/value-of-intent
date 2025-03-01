@@ -16,10 +16,8 @@ tmp/
 wandb/
 outputs/
 models/
-
-# virtualenv, installation, and slurm jobs
-.venv/
+*.sh
 slurm/
-tests/slurm/
+.venv/
 requirements.txt
 requirements.in

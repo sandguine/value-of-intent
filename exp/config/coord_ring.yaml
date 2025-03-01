@@ -1,7 +1,7 @@
 # General Experiment Settings
 SEED: 30                             
 NUM_SEEDS: 128                       
-LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250227/coord_ring/ub_ippo_oc_coord_ring_20250227_011445_30
+LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250228/coord_ring/ub_ippo_oc_coord_ring_20250228_165554_30
 
 # Environment Settings
 ENV_NAME: "overcooked"                

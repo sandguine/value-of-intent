@@ -42,22 +42,10 @@ import matplotlib.pyplot as plt
 from functools import partial
 
 class ActorCritic(nn.Module):
-    """Neural network architecture implementing both policy (actor) and value function (critic)
-
-    Attributes:
-        action_dim: Dimension of action space
-        activation: Activation function to use (either "relu" or "tanh")
-    """
     action_dim: Sequence[int]  # Dimension of action space
     activation: str = "tanh"   # Activation function to use
 
     def setup(self):
-        """Initialize layers and activation function.
-        This runs once when the model is created.
-        """
-        #print("Setup method called")
-
-        # Store activation function
         self.act_fn = nn.relu if self.activation == "relu" else nn.tanh
 
         # Initialize dense layers with consistent naming
@@ -102,19 +90,6 @@ class ActorCritic(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        """Forward pass of the network.
-        
-        Args:
-            x: Input tensor with shape (batch_size, input_dim)
-               where input_dim is either base_obs_dim or base_obs_dim + action_dim
-               
-        Returns:
-            Tuple of (action distribution, value estimate)
-        """
-        # # Print debug information about input shape
-        # print("Network input x shape:", x.shape)
-        # print("ActorCritic input shape:", x.shape)
-        
         # Expected input dimension is the last dimension of the input tensor
         expected_dim = x.shape[-1] if len(x.shape) > 1 else x.shape[0]
         # print(f"Expected input dim: {expected_dim}")
@@ -232,15 +207,6 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     return {a: x[i] for i, a in enumerate(agent_list)}
 
 def save_training_results(save_dir, out, config, prefix=""):
-    """
-    Save both complete training output and seed-specific parameters in JAX and pickle/npz formats.
-
-    Args:
-        save_dir: Directory to save results
-        out: Complete output from jax.vmap(train_jit)(rngs)
-        config: Config containing NUM_SEEDS
-        prefix: Optional prefix for filenames
-    """
     os.makedirs(save_dir, exist_ok=True)
 
     # Helper function to check if an object is pickleable

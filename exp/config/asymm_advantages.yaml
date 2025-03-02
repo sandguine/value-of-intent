@@ -1,7 +1,7 @@
 # General Experiment Settings
 SEED: 30                              
 NUM_SEEDS: 128                         
-LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250226/asymm_advantages/ub_ippo_oc_asymm_advantages_20250226_211907_30
+LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250301/asymm_advantages/ub_ippo_oc_asymm_advantages_20250301_104318_30/
 
 # Environment Settings
 ENV_NAME: "overcooked"                

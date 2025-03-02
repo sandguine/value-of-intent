@@ -1,6 +1,6 @@
 # General Experiment Settings
 SEED: 30                              # Random seed for reproducibility
-NUM_SEEDS: 128                         # Default for hyperparameter tuning (use 100 for adaptability tests)
+NUM_SEEDS: 128                        # Default for hyperparameter tuning (use 100 for adaptability tests)
 TRAINING_MODE: standard               # Options: adaptability, standard
 
 # Environment Settings

@@ -451,7 +451,7 @@ def make_train(config):
 
         # Initialize seeds
         rng, _rng = jax.random.split(rng)
-        _rng_agent_0, _rng_agent_1 = jax.random.split(_rng)  # Split for two networks _rng_agent_1 is unused
+        _rng_agent_0, _rng_agent_1 = jax.random.split(_rng)  # Split for two networks
 
         # Initialize networks with correct dimensions from config
         init_x_agent_0 = jnp.zeros(dims["base_obs_dim"])  # Agent 0 gets base obs
@@ -490,18 +490,6 @@ def make_train(config):
         def _update_step(runner_state, unused, pretrained_params):
             # COLLECT TRAJECTORIES
             def _env_step(runner_state, unused, pretrained_params):
-                """
-                Executes a single environment step while ensuring each agent_0 is paired
-                with the correct pretrained agent_1 policy.
-
-                Args:
-                    runner_state: (train_state, env_state, last_obs, update_step, rng)
-                    unused: Required for jax.lax.scan, not used.
-                    pretrained_params: The pretrained parameters for agent_1.
-
-                Returns:
-                    Updated runner_state and transition information.
-                """
                 train_state, env_state, last_obs, update_step, rng = runner_state
                 rng, rng_action_1, rng_action_0, rng_step = jax.random.split(rng, 4)
 

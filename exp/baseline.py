@@ -679,7 +679,7 @@ def main(hydra_config):
         tags=["IPPO", "FF", "Baseline", "Oracle", "Upper Bound"],
         config=config,  # Pass initial config
         mode=config["WANDB_MODE"],
-        name=f'ub_ippo_oc_{config["ENV_KWARGS"]["layout"]}',
+        name=f'ub_{config["ENV_KWARGS"]["layout"]}',
         # settings=wandb.Settings(start_method="thread"),
         # settings=wandb.Settings(code_dir=".", _disable_stats=True),
     )
@@ -690,7 +690,7 @@ def main(hydra_config):
     # Create results directory with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
-    model_dir_name = f"ub_ippo_oc_{layout_name}_{timestamp}"
+    model_dir_name = f"ub_{layout_name}_{timestamp}"
     save_dir = os.path.join(
         "saved_models", 
         date,
@@ -706,7 +706,7 @@ def main(hydra_config):
     out = jax.vmap(train_jit)(rngs)
     
     # Save results and generate visualizations
-    save_training_results(save_dir, out, config, prefix="ub_ippo_oc_")
+    save_training_results(save_dir, out, config, prefix="ub_")
     np.savez(os.path.join(save_dir, "ub_metrics.npz"), 
             **{key: np.array(value) for key, value in out["metrics"].items()})
     
@@ -715,7 +715,7 @@ def main(hydra_config):
         
     # Create and save visualization
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-    viz_base_name = f"ub_ippo_oc_{layout_name}"
+    viz_base_name = f"ub_{layout_name}"
     viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
     create_visualization(train_state, config, viz_filename, save_dir)
     
@@ -751,7 +751,7 @@ def main(hydra_config):
     plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     plt.grid()
     
-    learning_curve_name = f"ub_ippo_oc_learning_curve"
+    learning_curve_name = f"ub_learning_curve"
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))
     plt.close()

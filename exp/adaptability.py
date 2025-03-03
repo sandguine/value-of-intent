@@ -800,7 +800,7 @@ def main(config):
         tags=["IPPO", "FF", "Adaptability", "Oracle"],
         config=config,
         mode=config["WANDB_MODE"],
-        name=f'op_ippo_oc_{layout_name}'
+        name=f'op_{layout_name}'
     )
 
     print("\nVerifying config before rollout:")
@@ -817,7 +817,7 @@ def main(config):
     config["ENV_KWARGS"]["layout"] = overcooked_layouts[layout_name]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
-    model_dir_name = f"op_ippo_oc_{layout_name}_{timestamp}"
+    model_dir_name = f"op_{layout_name}_{timestamp}"
     save_dir = os.path.join(
         "saved_models", 
         date,
@@ -841,7 +841,7 @@ def main(config):
     # Generate and save visualization
     try:
         train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-        viz_base_name = f"op_ippo_oc_{layout_name}"
+        viz_base_name = f"op_{layout_name}"
         viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
         create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
     except Exception as e:  
@@ -849,7 +849,7 @@ def main(config):
         traceback.print_exc()
 
     # Save parameters and results
-    save_training_results(save_dir, out, config, prefix="op_ippo_oc_")
+    save_training_results(save_dir, out, config, prefix="op_")
     np.savez(os.path.join(save_dir, "op_metrics.npz"), 
             **{key: np.array(value) for key, value in out["metrics"].items()})
     
@@ -905,7 +905,7 @@ def main(config):
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid()
     
-    learning_curve_name = f"op_ippo_oc_learning_curve"
+    learning_curve_name = f"op_learning_curve"
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))
     plt.close()

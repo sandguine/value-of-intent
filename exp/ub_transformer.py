@@ -120,3 +120,69 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
 
+def get_rollout(train_state: TrainState, config: dict, save_dir=None):
+    """
+    Generate a single episode rollout for Transformer-based Upper Bound PPO visualization.
+    Both agents are learning and use the Transformer-based policy.
+    """
+
+    # Initialize environment
+    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+
+    # Initialize Transformer-based network
+    network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"])
+    key = jax.random.PRNGKey(0)
+    key, key_r, key_a = jax.random.split(key, 3)
+
+    # Initialize observation input shape for Transformer (sequence-based)
+    init_x = jnp.zeros((1, 1) + env.observation_space().shape)  # Add batch & sequence dim
+    network.init(key_a, init_x)
+    network_params = train_state.params
+
+    done = False
+
+    # Reset environment and initialize tracking lists
+    obs, state = env.reset(key_r)
+    state_seq = [state]
+    rewards = []
+    shaped_rewards = []
+
+    # Run episode until completion
+    while not done:
+        key, key_a0, key_a1, key_s = jax.random.split(key, 4)
+
+        # Stack and reshape observations for Transformer processing
+        obs_batch = jnp.stack([obs[a] for a in env.agents])  # Stack multi-agent observations
+        obs_batch = obs_batch.reshape((1, 1, *obs_batch.shape[1:]))  # Add sequence dim
+
+        # Get actions from Transformer-based policy for BOTH agents
+        pi, _ = network.apply(network_params, obs_batch)
+        actions = pi.sample(seed=key_a0)
+
+        # Convert actions to env format
+        env_act = {agent: actions[i].squeeze() for i, agent in enumerate(env.agents)}
+
+        # Step environment forward
+        obs, state, reward, done, info = env.step(key_s, state, env_act)
+        done = done["__all__"]
+        rewards.append(reward['agent_0'])
+        shaped_rewards.append(info["shaped_reward"]['agent_0'])
+
+        state_seq.append(state)
+
+    # Plot rewards for visualization (same as FF version)
+    plt.plot(rewards, label="reward", color='C0')
+    plt.plot(shaped_rewards, label="shaped_reward", color='C1')
+    plt.legend()
+    plt.xlabel("Timestep")
+    plt.ylabel("Reward")
+    plt.title("Episode Reward and Shaped Reward Progression")
+    plt.grid()
+    
+    # Save the reward plot
+    reward_plot_path = os.path.join(save_dir, "reward_plot.png") if save_dir else "reward_plot.png"
+    plt.savefig(reward_plot_path)
+    plt.show()
+    plt.close()
+
+    return state_seq

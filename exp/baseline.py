@@ -744,7 +744,7 @@ def main(hydra_config):
                     reward_mean + reward_std_err,
                     alpha=0.2, color='gray', label="Mean ± Std Err")
     for seed_idx in range(config["NUM_SEEDS"]):
-        plt.plot(rewards[seed_idx], label=f'Seed {seed_idx}', alpha=0.7)
+        plt.plot(rewards[seed_idx], alpha=0.7)
     plt.xlabel("Update Step")
     plt.ylabel("Returned Episode Returns")
     plt.title("Per-Seed Performance on Returned Episode Returns")

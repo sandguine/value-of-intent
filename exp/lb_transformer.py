@@ -62,9 +62,11 @@ class TransformerFeatureExtractor(nn.Module):
 
     def __call__(self, x):
         """Apply Transformer Encoder to input."""
+        print(f"Input shape to Transformer: {x.shape}")
         for block in self.encoder_blocks:
             x = block(x)  # Apply self-attention layers
         x = self.final_dense(x)  # Final feature projection
+        print(f"Output shape from Transformer: {x.shape}")
         return x
 
 class ActorCritic(nn.Module):
@@ -479,7 +481,7 @@ def make_train(config):
                 )(pretrained_params, agent_1_obs, rng_action_1_split)  # agent_1_action: (16,)
 
                 # Agent 0: Augment its observation
-                agent_0_obs = last_obs['agent_0'].reshape(num_envs, -1)  # Shape: (16, 520)
+                agent_0_obs = last_obs['agent_0'].reshape(num_envs, 1, -1)  # Shape: (16, 520)
 
                 # Apply agent_0 policy using trainable parameters
                 agent_0_pi, agent_0_value = network.apply(train_state.params, agent_0_obs)
@@ -518,7 +520,7 @@ def make_train(config):
             train_state, env_state, last_obs, update_step, rng = runner_state
             
             # Calculate last values for agent_0 (the learning agent)
-            last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1)
+            last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], 1, -1)
             _, agent_0_last_val = network.apply(train_state.params, last_obs_agent0)
             # print("agent_0_last_val shape:", agent_0_last_val.shape)
 

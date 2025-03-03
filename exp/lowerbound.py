@@ -112,12 +112,12 @@ class ActorCritic(nn.Module):
             Tuple of (action distribution, value estimate)
         """
         # # Print debug information about input shape
-        print("Network input x shape:", x.shape)
-        print("ActorCritic input shape:", x.shape)
+        # print("Network input x shape:", x.shape)
+        # print("ActorCritic input shape:", x.shape)
         
         # Expected input dimension is the last dimension of the input tensor
         expected_dim = x.shape[-1] if len(x.shape) > 1 else x.shape[0]
-        print(f"Expected input dim: {expected_dim}")
+        # print(f"Expected input dim: {expected_dim}")
 
         # Actor network
         actor = self.actor_dense1(x)
@@ -892,7 +892,7 @@ def main(config):
                         reward_mean + reward_std_err,
                         alpha=0.2, color='gray', label="Mean ± Std Err")
         for seed_idx in range(config["NUM_SEEDS"]):
-            plt.plot(rewards[seed_idx], label=f'Seed {seed_idx}', alpha=0.7)
+            plt.plot(rewards[seed_idx], alpha=0.7)
         plt.xlabel("Update Step")
         plt.ylabel("Returned Episode Returns")
         plt.title("Per-Seed Performance on Returned Episode Returns")

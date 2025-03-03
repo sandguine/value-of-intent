@@ -164,16 +164,13 @@ def get_rollout(params, config):
 
     return state_seq
 
-
 def batchify(x: dict, agent_list, num_actors):
     x = jnp.stack([x[a] for a in agent_list])
     return x.reshape((num_actors, -1))
 
-
 def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     x = x.reshape((num_actors, num_envs, -1))
     return {a: x[i] for i, a in enumerate(agent_list)}
-
 
 def make_train(config):
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
@@ -445,7 +442,6 @@ def single_run(config):
     # agent_view_size is hardcoded as it determines the padding around the layout.
     viz.animate(state_seq, agent_view_size=5, filename=f"{filename}.gif")
 
-
 def tune(default_config):
     """Hyperparameter sweep with wandb."""
     import copy
@@ -494,7 +490,6 @@ def tune(default_config):
         sweep_config, entity=default_config["ENTITY"], project=default_config["PROJECT"]
     )
     wandb.agent(sweep_id, wrapped_make_train, count=1000)
-
 
 @hydra.main(version_base=None, config_path="config", config_name="ippo_cnn_overcooked")
 def main(config):

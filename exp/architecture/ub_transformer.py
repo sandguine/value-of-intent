@@ -120,6 +120,7 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
 
+# might need rewrite
 def get_rollout(train_state: TrainState, config: dict, save_dir=None):
     """
     Generate a single episode rollout for Transformer-based Upper Bound PPO visualization.
@@ -186,3 +187,126 @@ def get_rollout(train_state: TrainState, config: dict, save_dir=None):
     plt.close()
 
     return state_seq
+
+
+def make_train(config):
+    # Initialize environment
+    env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+
+    # Calculate key training parameters
+    config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
+    config["NUM_UPDATES"] = (
+        config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"] 
+    )
+    config["MINIBATCH_SIZE"] = (
+        config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
+    )
+    
+    env = LogWrapper(env, replace_info=False)
+    
+    def linear_schedule(count):
+        """Learning rate annealing schedule"""
+        frac = 1.0 - (count // (config["NUM_MINIBATCHES"] * config["UPDATE_EPOCHS"])) / config["NUM_UPDATES"]
+        return config["LR"] * frac
+    
+    # Schedule for annealing reward shaping
+    rew_shaping_anneal = optax.linear_schedule(
+        init_value=1.,
+        end_value=0.,
+        transition_steps=config["REW_SHAPING_HORIZON"]
+    )
+
+    # This is the main training loop where the training starts.
+    # It initializes network with: correct number of parameters, optimizer, and learning rate annealing.
+    def train(rng):
+        """Main training loop"""
+        # Initialize network and optimizer
+        network = ActorCritic(
+            env.action_space().n,
+            activation=config["ACTIVATION"]
+        )
+        rng, _rng = jax.random.split(rng)
+        init_x = jnp.zeros(env.observation_space().shape)
+        
+        init_x = init_x.flatten()
+        # print("init_x shape:", init_x.shape)
+        
+        network_params = network.init(_rng, init_x)
+        
+        # Setup optimizer with optional learning rate annealing
+        if config["ANNEAL_LR"]:
+            tx = optax.chain(
+                optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
+                optax.adam(learning_rate=linear_schedule, eps=1e-5),
+            )
+        else:
+            tx = optax.chain(optax.clip_by_global_norm(config["MAX_GRAD_NORM"]), optax.adam(config["LR"], eps=1e-5))
+        train_state = TrainState.create(
+            apply_fn=network.apply,
+            params=network_params,
+            tx=tx,
+        )
+        
+        # Initialize environment states
+        rng, _rng = jax.random.split(rng)
+        reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
+        obsv, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
+        
+        # TRAIN LOOP
+        def _update_step(runner_state, unused):
+            # COLLECT TRAJECTORIES
+            # This function handle single environment step and collets transitions
+            
+            # These lines need to be moved once settled
+            from collections import deque
+            # Define sequence length for Transformer
+            SEQUENCE_LENGTH = config["SEQUENCE_LENGTH"]
+
+            def _env_step(runner_state, obs_buffer, unused):
+                train_state, env_state, last_obs, update_step, rng = runner_state
+
+                # Maintain rolling buffer of past observations
+                if len(obs_buffer) < SEQUENCE_LENGTH:
+                    # Not enough history -> pad with last_obs
+                    obs_seq = jnp.repeat(last_obs[None, :], SEQUENCE_LENGTH, axis=0)
+                else:
+                    # Enough history -> use real sequence
+                    obs_buffer.append(last_obs)  # Append latest observation
+                    obs_buffer.popleft()  # Remove oldest to maintain fixed length
+                    obs_seq = jnp.stack(list(obs_buffer), axis=1)
+
+                # SELECT ACTION
+                rng, _rng = jax.random.split(rng)
+                obs_batch = batchify(obs_seq, env.agents, config["NUM_ACTORS"])  # Adapted for Transformer
+                pi, value = network.apply(train_state.params, obs_batch)  # Transformer processes sequential input
+                action = pi.sample(seed=_rng)
+                log_prob = pi.log_prob(action)
+
+                env_act = unbatchify(action, env.agents, config["NUM_ENVS"], env.num_agents)
+                env_act = {k: v.flatten() for k, v in env_act.items()}
+
+                # STEP ENV
+                rng, _rng = jax.random.split(rng)
+                rng_step = jax.random.split(_rng, config["NUM_ENVS"])
+
+                obsv, env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0))(
+                    rng_step, env_state, env_act
+                )
+
+                info["reward"] = reward["agent_0"]
+
+                current_timestep = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+                reward = jax.tree_util.tree_map(lambda x, y: x + y * rew_shaping_anneal(current_timestep), 
+                                                reward, info["shaped_reward"])
+
+                transition = Transition(
+                    batchify(done, env.agents, config["NUM_ACTORS"]).squeeze(),
+                    action,
+                    value,
+                    batchify(reward, env.agents, config["NUM_ACTORS"]).squeeze(),
+                    log_prob,
+                    obs_batch,
+                )
+                runner_state = (train_state, env_state, obsv, update_step, rng)
+                
+                return runner_state, obs_buffer, (transition, info)

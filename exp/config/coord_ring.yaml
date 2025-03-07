@@ -24,7 +24,10 @@ CLIP_EPS: 0.2
 ENT_COEF: 0.05                        # 0.05 intuition might get better because preventing getting stuck in local_min
 VF_COEF: 0.5                          
 MAX_GRAD_NORM: 0.5                    
-REW_SHAPING_HORIZON: 2.5e7            
+REW_SHAPING_HORIZON: 2.5e7      
+
+# Transformer Settings
+SEQ_LEN: 5
 
 # WandB Integration
 ENTITY: "sandily"                    

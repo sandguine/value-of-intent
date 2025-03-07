@@ -1,6 +1,7 @@
 """
-This is the lowerbound training for the overcooked environment. 
-We are removing all the augmentations and just using the base observations.
+Implementation of Transformer-based Actor-Critic model for PPO.
+
+Agent_0 is a Transformer-based learning agent. Agent_1 is fixed with pretrained FF or CNN policies.
 """
 
 # Core imports for JAX machine learning
@@ -10,7 +11,7 @@ import flax.linen as nn
 import numpy as np
 import optax
 from flax.linen.initializers import constant, orthogonal
-from typing import Sequence, NamedTuple, Any
+from typing import NamedTuple, Any
 from flax.training.train_state import TrainState
 import distrax
 import flax
@@ -26,14 +27,13 @@ from jaxmarl.viz.overcooked_visualizer import OvercookedVisualizer
 import hydra
 from omegaconf import DictConfig, OmegaConf
 import wandb
-from typing import Dict, Any, Optional
-import traceback
 
 # Results saving imports
 import os
 import pickle
 from datetime import datetime
 from pathlib import Path
+import traceback
 
 # Plotting imports
 import matplotlib.pyplot as plt
@@ -41,112 +41,107 @@ import matplotlib.pyplot as plt
 # Helper imports
 from functools import partial
 
-class ActorCritic(nn.Module):
-    """Neural network architecture implementing both policy (actor) and value function (critic)
+import flax.linen as nn
+import jax.numpy as jnp
+import jax
+from flax.linen.initializers import orthogonal, constant
 
-    Attributes:
-        action_dim: Dimension of action space
-        activation: Activation function to use (either "relu" or "tanh")
-    """
-    action_dim: Sequence[int]  # Dimension of action space
-    activation: str = "tanh"   # Activation function to use
+class TransformerFeatureExtractor(nn.Module):
+    """Minimal Transformer Encoder for PPO with sequence processing."""
+    num_layers: int = 2  # Number of Transformer blocks
+    model_dim: int = 64  # Hidden dimension
+    num_heads: int = 4   # Attention heads
+    seq_len: int = 5     # Number of timesteps to consider
 
     def setup(self):
-        """Initialize layers and activation function.
-        This runs once when the model is created.
-        """
-        #print("Setup method called")
+        """Define Transformer Encoder layers."""
+        # Projection layer to map input features (base_obs_dim) to model_dim
+        self.input_projection = nn.Dense(self.model_dim, kernel_init=orthogonal(jnp.sqrt(2)), name="input_projection")
 
-        # Store activation function
-        self.act_fn = nn.relu if self.activation == "relu" else nn.tanh
+        # Transformer encoder layers
+        self.encoder_blocks = [
+            nn.SelfAttention(
+                num_heads=self.num_heads,
+                qkv_features=self.model_dim,
+                kernel_init=orthogonal(jnp.sqrt(2))
+            ) for _ in range(self.num_layers)
+        ]
 
-        # Initialize dense layers with consistent naming
-        self.actor_dense1 = nn.Dense(
-            64, 
-            kernel_init=orthogonal(np.sqrt(2)), 
-            bias_init=constant(0.0),
-            name="actor_dense1"
-        )
-        self.actor_dense2 = nn.Dense(
-            64,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-            name="actor_dense2"
-        )
-        self.actor_out = nn.Dense(
-            self.action_dim,
-            kernel_init=orthogonal(0.01),
-            bias_init=constant(0.0),
-            name="actor_out"
-        )
+        # Final dense layer for feature extraction
+        self.final_dense = nn.Dense(features=self.model_dim, kernel_init=orthogonal(jnp.sqrt(2)))
 
-        # Critic network layers
-        self.critic_dense1 = nn.Dense(
-            64,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-            name="critic_dense1"
-        )
-        self.critic_dense2 = nn.Dense(
-            64,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-            name="critic_dense2"
-        )
-        self.critic_out = nn.Dense(
-            1,
-            kernel_init=orthogonal(1.0),
-            bias_init=constant(0.0),
-            name="critic_out"
-        )
+    def create_positional_encoding(self, seq_len, model_dim):
+        """Create sinusoidal positional encoding for sequence processing."""
+        positions = jnp.arange(seq_len)[:, None]  # Shape (seq_len, 1)
+        div_term = jnp.exp(jnp.arange(0, model_dim, 2) * -(jnp.log(10000.0) / model_dim))
+        pos_enc = jnp.zeros((seq_len, model_dim))
+
+        pos_enc = pos_enc.at[:, 0::2].set(jnp.sin(positions * div_term))
+        pos_enc = pos_enc.at[:, 1::2].set(jnp.cos(positions * div_term))
+        return pos_enc
 
     @nn.compact
     def __call__(self, x):
-        """Forward pass of the network.
-        
-        Args:
-            x: Input tensor with shape (batch_size, input_dim)
-               where input_dim is either base_obs_dim or base_obs_dim + action_dim
-               
-        Returns:
-            Tuple of (action distribution, value estimate)
-        """
-        # # Print debug information about input shape
-        # print("Network input x shape:", x.shape)
-        # print("ActorCritic input shape:", x.shape)
-        
-        # Expected input dimension is the last dimension of the input tensor
-        expected_dim = x.shape[-1] if len(x.shape) > 1 else x.shape[0]
-        # print(f"Expected input dim: {expected_dim}")
+        """Apply Transformer Encoder to input."""
+        # Ensure input is projected to match `model_dim`
+        x = self.input_projection(x)  # Shape: (batch, seq_len, model_dim)
+
+        # Compute positional encoding on-the-fly
+        pos_enc = self.create_positional_encoding(self.seq_len, self.model_dim)
+
+        # Add position information
+        x = x + pos_enc
+
+        # Apply Transformer layers
+        for block in self.encoder_blocks:
+            x = block(x)  # Apply self-attention layers
+
+        x = self.final_dense(x)  # Final feature projection
+        return x
+
+class ActorCritic(nn.Module):
+    action_dim: int
+    activation: str = "tanh"
+    seq_len: int = 5  # Sequence length for Transformer
+
+    def setup(self):
+        """Define Transformer-based Actor-Critic architecture."""
+        self.act_fn = nn.relu if self.activation == "relu" else nn.tanh
+
+        # Feature extractor: Transformer-based
+        self.feature_extractor = TransformerFeatureExtractor(seq_len=self.seq_len)
 
         # Actor network
-        actor = self.actor_dense1(x)
-        actor = self.act_fn(actor)
-        actor = self.actor_dense2(actor)
-        actor = self.act_fn(actor)
-        actor = self.actor_out(actor)
-        pi = distrax.Categorical(logits=actor)
+        self.actor_hidden = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0), name="actor_hidden")
+        self.actor_out = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01), bias_init=constant(0.0), name="actor_output")
 
         # Critic network
-        critic = self.critic_dense1(x)
-        critic = self.act_fn(critic)
-        critic = self.critic_dense2(critic)
-        critic = self.act_fn(critic)
-        critic = self.critic_out(critic)
+        self.critic_hidden = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)), bias_init=constant(0.0), name="critic_hidden")
+        self.critic_out = nn.Dense(1, kernel_init=orthogonal(1.0), bias_init=constant(0.0), name="critic_output")
 
-        return pi, jnp.squeeze(critic, axis=-1)
+    @nn.compact
+    def __call__(self, x):
+        """Forward pass of the Transformer-based Actor-Critic model."""
+        # Extract features using Transformer
+        features = self.feature_extractor(x)  # Shape (B, T, model_dim)
+
+        # Take the last timestep's features
+        last_feature = features[:, -1, :]  # Shape (B, model_dim)
+
+        # Actor head
+        actor_hidden = self.actor_hidden(last_feature)
+        actor_hidden = self.act_fn(actor_hidden)
+        actor_logits = self.actor_out(actor_hidden)
+        pi = distrax.Categorical(logits=actor_logits)
+
+        # Critic head
+        critic_hidden = self.critic_hidden(last_feature)
+        critic_hidden = self.act_fn(critic_hidden)
+        critic_value = self.critic_out(critic_hidden)
+
+        return pi, jnp.squeeze(critic_value, axis=-1)
 
 class Transition(NamedTuple):
-    """Container for storing experience transitions
-
-    Attributes:
-        done: Episode termination flag
-        action: Actual action taken by the agent
-        value: Value function estimate
-        reward: Reward received
-        log_prob: Log probability of action
-        obs: Observation
-    """
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
@@ -154,30 +149,32 @@ class Transition(NamedTuple):
     log_prob: jnp.ndarray
     obs: jnp.ndarray
 
-def get_rollout(train_state, agent_1_params, config, save_dir=None):
-    """Generate a single episode rollout for visualization (Lower Bound Version).
+def get_rollout(train_state: TrainState, agent_1_params: dict, config: dict, save_dir=None):
+    """
+    Generate a single episode rollout for visualization (Lower Bound Version for Transformer PPO).
+    Applies Transformer policy only to agent_0 while using a fixed policy for agent_1.
     """
 
     # Initialize environment
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
 
-    # Initialize network
-    network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"])
+    # Initialize Transformer-based network
+    network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"], seq_len=config["SEQ_LEN"])
     key = jax.random.PRNGKey(0)
     key, key_r, key_a = jax.random.split(key, 3)
 
     # Initialize observation input shape
     init_x = jnp.zeros((1,) + env.observation_space().shape).flatten()
-    network.init(key_a, init_x)
+    network_params_agent_0 = network.init(key_a, init_x)
 
-    # Ensure using the first seed of first parallel env is selected if multiple seeds are present
+    # Ensure using the first seed of the first parallel env is selected if multiple seeds are present
     agent_1_params = {
         "params": jax.tree_util.tree_map(lambda x: x[0], agent_1_params["params"])
     }
 
-    # Initialize agent_0 parameters (train_state) and retreive agent_1 parameters (pretrained)
-    network_params_agent_0 = train_state.params
-    network_params_agent_1 = agent_1_params
+    # Retrieve network parameters
+    network_params_agent_0 = train_state.params  # Trainable Transformer policy
+    network_params_agent_1 = agent_1_params  # Fixed pretrained policy
 
     done = False
     obs, state = env.reset(key_r)
@@ -185,34 +182,43 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
     rewards = []
     shaped_rewards = []
 
+    # Initialize observation sequence buffer for Transformer agent
+    seq_len = 5  # Match Transformer sequence length
+    obs_history_0 = jnp.roll(obs_history_0, shift=-1, axis=1)  # Shift all observations left
+    obs_history_0 = obs_history_0.at[:, -1, :].set(last_obs['agent_0'])  # Add newest observation
+
     # Run episode until completion
     while not done:
         key, key_a0, key_a1, key_s = jax.random.split(key, 4)
 
-        # Flatten observations for network input
+        # Flatten observations to match Transformer input expectations
         obs = {k: v.flatten() for k, v in obs.items()}
-        obs_agent_1 = obs["agent_1"][None, ...]
-        obs_agent_0 = obs["agent_0"][None, ...]
+        obs_agent_1 = obs["agent_1"][None, ...]  # Batch dim for agent_1
 
-        # Agent 1 (fixed partner) action
-        pi_1, _ = network.apply(network_params_agent_1, obs_agent_1)
-        action_1 = pi_1.sample(seed=key_a1)[0]
+        # Agent 1 (fixed partner) action using preloaded parameters
+        pi_1, _ = network.apply(network_params_agent_1, obs_agent_1)  # Fixed policy
+        action_1 = pi_1.sample(seed=key_a1)[0]  # Sample action
 
-        # Agent 0 (learning agent) action
-        pi_0, _ = network.apply(network_params_agent_0, obs_agent_0)
-        action_0 = pi_0.sample(seed=key_a0)[0]
+        # Shift observation history for agent_0 BEFORE selecting action
+        obs_history_0 = jnp.roll(obs_history_0, shift=-1, axis=0)
+        obs_history_0 = obs_history_0.at[-1, :].set(obs["agent_0"])
+
+        # Use updated observation sequence
+        pi_0, _ = network.apply(network_params_agent_0, obs_history_0[None, ...])  # Transformer policy
+        action_0 = pi_0.sample(seed=key_a0)[0]  # Sample action
 
         actions = {"agent_0": action_0, "agent_1": action_1}
 
         # Step environment forward
         obs, state, reward, done, info = env.step(key_s, state, actions)
-        done = done["__all__"]  # Consistency with baseline
+        done = done["__all__"]  # Ensure proper episode termination tracking
 
+        # Track rewards
         rewards.append(reward['agent_0'])
         shaped_rewards.append(info["shaped_reward"]['agent_0'])
         state_seq.append(state)
 
-    # Plot rewards for visualization
+    # Plot rewards for visualization (same as FF version)
     plt.plot(rewards, label="reward", color='C0')
     plt.plot(shaped_rewards, label="shaped_reward", color='C1')
     plt.legend()
@@ -220,10 +226,9 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
     plt.ylabel("Reward")
     plt.title("Episode Reward and Shaped Reward Progression")
     plt.grid()
-    if save_dir:
-        reward_plot_path = os.path.join(save_dir, "reward_plot.png")
-    else:
-        reward_plot_path = "reward_plot.png"
+
+    # Save the reward plot
+    reward_plot_path = os.path.join(save_dir, "reward_plot.png") if save_dir else "reward_plot.png"
     plt.savefig(reward_plot_path)
     plt.show()
     plt.close()
@@ -235,8 +240,8 @@ def batchify(x: dict, agent_list, num_actors):
     return x.reshape((num_actors, -1))
 
 def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
-    x = x.reshape((num_actors, num_envs, -1)) # This reshapes the observation space to a 3D array with the shape (num_actors, num_envs, -1)
-    return {a: x[i] for i, a in enumerate(agent_list)} # This returns the observation space for the agents
+    x = x.reshape((num_actors, num_envs, -1))
+    return {a: x[i] for i, a in enumerate(agent_list)}
 
 def save_training_results(save_dir, out, config, prefix=""):
     os.makedirs(save_dir, exist_ok=True)
@@ -366,16 +371,16 @@ def load_training_results(load_dir, load_type="params", config=None):
             num_seeds = len(all_params.keys())
             print("num seeds", num_seeds)
 
-            all_params = flax.core.freeze(all_params)
             num_envs = config["NUM_ENVS"]
 
             sampled_indices = jax.random.choice(subkey, num_seeds, shape=(num_envs,), replace=False) # Sample equivalent to NUM_ENVS
 
             print("sampled_indices", sampled_indices)
 
-            sampled_params_list = [{'params': all_params[f'seed_{i}']['params']} for i in sampled_indices]
+            # Freeze only the parameters, not the entire dictionary
+            sampled_params_list = [{'params': flax.core.freeze(all_params[f'seed_{i}']['params'])} for i in sampled_indices]
 
-            # Extract 16 sampled parameter sets
+            # Stack the sampled parameter sets correctly
             sampled_params = jax.tree_util.tree_map(
                 lambda *x: jnp.stack(x, axis=0), *sampled_params_list
             )
@@ -400,22 +405,24 @@ def load_training_results(load_dir, load_type="params", config=None):
     
     raise FileNotFoundError(f"No saved {load_type} found in {load_dir}")
 
+
 def create_visualization(train_state, agent_1_params, config, filename, save_dir=None, agent_view_size=5):
     """Helper function to create and save visualization"""
     if not isinstance(config, dict):
         config = OmegaConf.to_container(config, resolve=True)
     
     # Get the rollout
-    state_seq = get_rollout(train_state, agent_1_params, config, save_dir)
+    # state_seq = get_rollout(train_state, agent_1_params, config, save_dir)
     
     # Create visualization
-    viz = OvercookedVisualizer()
-    viz.animate(state_seq, agent_view_size=agent_view_size, filename=filename)
+    # viz = OvercookedVisualizer()
+    # viz.animate(state_seq, agent_view_size=agent_view_size, filename=filename)
 
 def make_train(config):
     # Initialize environment
     dims = config["DIMS"]
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
+    seq_len = config["SEQ_LEN"]
 
     # Verify dimensions match what we validated in main
     assert np.prod(env.observation_space().shape) == dims["base_obs_dim"], "Observation dimension mismatch"
@@ -443,10 +450,11 @@ def make_train(config):
         transition_steps=config["REW_SHAPING_HORIZON"]
     )
 
-    def train(rng, pretrained_params):
+    def train(rng, pretrained_params, seq_len):
         network = ActorCritic(
             action_dim=dims["action_dim"],  # Use dimension from config
-            activation=config["ACTIVATION"]
+            activation=config["ACTIVATION"],
+            seq_len=seq_len
         )
 
         # Initialize seeds
@@ -454,8 +462,7 @@ def make_train(config):
         _rng_agent_0, _rng_agent_1 = jax.random.split(_rng)  # Split for two networks
 
         # Initialize networks with correct dimensions from config
-        init_x_agent_0 = jnp.zeros(dims["base_obs_dim"])  # Agent 0 gets base obs
-        
+        init_x_agent_0 = jnp.zeros((1, seq_len, dims["base_obs_dim"]))  # Shape (1, 5, 520)
         network_params_agent_0 = network.init(_rng_agent_0, init_x_agent_0)
         
         def create_optimizer(config):
@@ -487,32 +494,34 @@ def make_train(config):
         obsv, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
         
         # TRAIN LOOP
-        def _update_step(runner_state, unused, pretrained_params):
+        def _update_step(runner_state, unused, seq_len, pretrained_params):
             # COLLECT TRAJECTORIES
-            def _env_step(runner_state, unused, pretrained_params):
-                train_state, env_state, last_obs, update_step, rng = runner_state
+            def _env_step(runner_state, unused, seq_len, pretrained_params):
+                train_state, env_state, last_obs, update_step, rng, obs_history_0 = runner_state
                 rng, rng_action_1, rng_action_0, rng_step = jax.random.split(rng, 4)
 
-                # Extract correct agent_1 parameters per environment
                 num_envs = last_obs['agent_1'].shape[0]  # Should be 16
-                # print("num_envs:", num_envs)
 
                 agent_1_obs = last_obs['agent_1'].reshape(num_envs, -1)  # Shape: (520,)
-                # print("agent_1_obs shape:", agent_1_obs.shape)
-
                 rng_action_1_split = jax.random.split(rng_action_1, num_envs)
 
                 # Vectorized application across all environments
                 agent_1_action = jax.vmap(
                     lambda params, obs, rng: network.apply(params, obs)[0].sample(seed=rng),
                     in_axes=(0, 0, 0)
-                )(pretrained_params, agent_1_obs, rng_action_1_split)  # agent_1_action: (16,)
+                )(pretrained_params, agent_1_obs, rng_action_1_split)
 
-                # Agent 0: Augment its observation
-                agent_0_obs = last_obs['agent_0'].reshape(num_envs, -1)  # Shape: (16, 520)
+                # Initialize history buffer at the start of rollout
+                if update_step == 0:  
+                    obs_history_0 = jnp.roll(obs_history_0, shift=-1, axis=1)  # Shift all observations left
+                obs_history_0 = obs_history_0.at[:, -1, :].set(last_obs['agent_0'])  # Add newest observation
+
+                # Shift observation history for agent_0 BEFORE selecting action
+                obs_history_0 = jnp.roll(obs_history_0, shift=-1, axis=1)
+                obs_history_0 = obs_history_0.at[:, -1, :].set(last_obs['agent_0'])
 
                 # Apply agent_0 policy using trainable parameters
-                agent_0_pi, agent_0_value = network.apply(train_state.params, agent_0_obs)
+                agent_0_pi, agent_0_value = network.apply(train_state.params, obs_history_0)
                 agent_0_action = agent_0_pi.sample(seed=rng_action_0)
                 agent_0_log_prob = agent_0_pi.log_prob(agent_0_action)
 
@@ -531,28 +540,28 @@ def make_train(config):
                     value=agent_0_value,
                     reward=reward["agent_0"],
                     log_prob=agent_0_log_prob,
-                    obs=agent_0_obs,
+                    obs=obs_history_0,
                 )
 
-                runner_state = (train_state, next_env_state, next_obs, update_step, rng)
+                # Pass obs_history_0 forward for next step
+                runner_state = (train_state, next_env_state, next_obs, update_step, rng, obs_history_0)
                 return runner_state, (transition, info)
 
             runner_state, (traj_batch, info) = jax.lax.scan(
-                lambda state, unused: _env_step(state, unused, pretrained_params),  
+                lambda state, unused: _env_step(state, unused, seq_len, pretrained_params),  
                 runner_state, 
                 None, 
                 config["NUM_STEPS"]
             )
             
             # CALCULATE ADVANTAGE
-            train_state, env_state, last_obs, update_step, rng = runner_state
+            train_state, env_state, last_obs, update_step, rng, obs_history_0 = runner_state
             
-            # Calculate last values for agent_0 (the learning agent)
-            last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1)
-            _, agent_0_last_val = network.apply(train_state.params, last_obs_agent0)
-            # print("agent_0_last_val shape:", agent_0_last_val.shape)
+            # Ensure sequence length matches Transformer expectation
+            # last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], seq_len, -1)
+            last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], seq_len, -1)
 
-            # Values for advantage calculation
+            # Compute last value for advantage calculation
             _, last_val = network.apply(train_state.params, last_obs_agent0)
 
             # calculate_gae itself didn't need to be changed because we can use the same advantage function for both agents
@@ -592,42 +601,56 @@ def make_train(config):
             advantages, targets = _calculate_gae(traj_batch, last_val)
 
             # UPDATE NETWORK
-            def _update_epoch(update_state, unused, config):
-                def _update_minbatch(train_state, batch_info, config):
+            def _update_epoch(update_state, unused, seq_len, config, network):
+                def _update_minbatch(train_state, batch_info, seq_len, config, network):
                     print("\nStarting minibatch update...")
+
                     # Unpack batch_info which now contains only agent_0 data
                     agent_0_data = batch_info['agent_0']
-                    
-                    # print("Minibatch shapes:")
-                    # print("Agent 0 data:", jax.tree_util.tree_map(lambda x: x.shape, agent_0_data))
-
                     traj_batch = agent_0_data['traj']
                     advantages = agent_0_data['advantages']
                     targets = agent_0_data['targets']
 
-                    def _loss_fn(params, traj_batch, gae, targets, config):
+                    def _loss_fn(params, traj_batch, gae, seq_len, targets, config, network):
                         """Calculate loss for agent_0."""
-                        pi, value = network.apply(params, traj_batch.obs)
+
+                        # Ensure batch size is correctly inferred
+                        batch_size = traj_batch.obs.shape[0] // seq_len if traj_batch.obs.shape[0] % seq_len == 0 else traj_batch.obs.shape[0]
+                        # obs_seq = traj_batch.obs.reshape(batch_size, seq_len, traj_batch.obs.shape[-1])
+                        obs_seq = traj_batch.obs.reshape(-1, seq_len, traj_batch.obs.shape[-1])
+
+                        # Forward pass through Transformer
+                        pi, value = network.apply(params, obs_seq)
                         log_prob = pi.log_prob(traj_batch.action)
+
+                        # Ensure targets match the sequence format
+                        if targets.ndim == 1:
+                            targets = targets[:, None]  # Ensure at least (batch_size, 1)
+                        targets_seq = targets.reshape(batch_size, seq_len, -1)
 
                         # Value loss calculation
                         value_pred_clipped = traj_batch.value + (
                             value - traj_batch.value
                         ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
-                        value_losses = jnp.square(value - targets)
-                        value_losses_clipped = jnp.square(value_pred_clipped - targets)
+                        value_losses = jnp.square(value - targets_seq)
+                        value_losses_clipped = jnp.square(value_pred_clipped - targets_seq)
                         value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
 
-                        # Actor loss calculation
+                        # Normalize GAE correctly along the sequence dimension
+                        if seq_len > 1:
+                            gae = (gae - gae.mean(axis=1, keepdims=True)) / (gae.std(axis=1, keepdims=True) + 1e-8)
+
+                        # PPO Actor Loss (Clipped Ratio)
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
                         loss_actor = -jnp.minimum(
                             ratio * gae,
                             jnp.clip(ratio, 1.0 - config["CLIP_EPS"], 1.0 + config["CLIP_EPS"]) * gae
                         ).mean()
 
+                        # Entropy regularization (Exploration bonus)
                         entropy = pi.entropy().mean()
 
+                        # Compute total loss
                         total_loss = (
                             loss_actor
                             + config["VF_COEF"] * value_loss
@@ -641,19 +664,19 @@ def make_train(config):
                             'total_loss': total_loss
                         }
 
-                    # Compute gradients for agent 0
-                    grad_fn_0 = jax.value_and_grad(lambda p: _loss_fn(p, traj_batch, advantages, targets, config), has_aux=True)
+                    # Compute gradients for agent_0
+                    grad_fn_0 = jax.value_and_grad(lambda p: _loss_fn(p, traj_batch, advantages, seq_len, targets, config, network), has_aux=True)
                     (loss_0, aux_0), grads_0 = grad_fn_0(train_state.params)
 
-                    # Compute gradient norms correctly
+                    # Compute gradient norms
                     grad_norm_0 = optax.global_norm(grads_0)
 
                     # Update only agent_0
                     train_state = train_state.apply_gradients(grads=grads_0)
 
                     return train_state, (loss_0, aux_0)
-
-                train_state, traj_batch, advantages, targets, rng = update_state
+                
+                train_state, traj_batch, advantages, targets, obs_history_0, rng = update_state
                 rng, _rng = jax.random.split(rng)
 
                 # Calculate total batch size and minibatch size
@@ -665,7 +688,6 @@ def make_train(config):
 
                 # Reshape function that handles the different observation sizes
                 def reshape_agent_data(agent_dict):
-
                     def reshape_field(x, field_name):
                         if not isinstance(x, (dict, jnp.ndarray)):
                             return x
@@ -677,7 +699,8 @@ def make_train(config):
                             for field in agent_dict['traj']._fields
                         }),
                         'advantages': agent_dict['advantages'].reshape(batch_size),
-                        'targets': agent_dict['targets'].reshape(batch_size)
+                        'targets': agent_dict['targets'].reshape(batch_size),
+                        'obs_history_0': agent_dict['obs_history_0'].reshape(batch_size, seq_len, -1)  # Fix for Transformer input
                     }
 
                 # Reshape trajectory data
@@ -695,20 +718,22 @@ def make_train(config):
                             for field in data['traj']._fields
                         }),
                         'advantages': jnp.take(data['advantages'], permutation, axis=0),
-                        'targets': jnp.take(data['targets'], permutation, axis=0)
+                        'targets': jnp.take(data['targets'], permutation, axis=0),
+                        'obs_history_0': jnp.take(data['obs_history_0'], permutation, axis=0)
                     }
                     for agent, data in agent_data.items()
                 }
-
+                
                 # Minibatch function
                 def create_minibatches(data):
                     return {
                         'traj': Transition(**{
                             field: getattr(data["traj"], field).reshape((config["NUM_MINIBATCHES"], -1) + getattr(data["traj"], field).shape[1:])
-                            for field in data["traj"]._fields  # Use data["traj"]
+                            for field in data["traj"]._fields
                         }),
                         'advantages': data["advantages"].reshape((config["NUM_MINIBATCHES"], -1)),
-                        'targets': data["targets"].reshape((config["NUM_MINIBATCHES"], -1))
+                        'targets': data["targets"].reshape((config["NUM_MINIBATCHES"], -1)),
+                        'obs_history_0': data["obs_history_0"].reshape((config["NUM_MINIBATCHES"], -1, seq_len, -1))
                     }
 
                 # Create minibatches
@@ -717,16 +742,16 @@ def make_train(config):
 
                 # Perform minibatch updates
                 train_state, total_loss = jax.lax.scan(
-                    lambda state, data: _update_minbatch(state, data, config),  
-                    train_state, 
+                    lambda state, data: _update_minbatch(state, data, seq_len, config, network),
+                    train_state,
                     minibatches
                 )
 
                 return (train_state, traj_batch, advantages, targets, rng), total_loss
 
-            update_state = (train_state, traj_batch, advantages, targets, rng)
+            update_state = (train_state, traj_batch, advantages, targets, obs_history_0, rng)
             update_state, loss_info = jax.lax.scan(
-                lambda state, _: _update_epoch(state, _, config),
+                lambda state, _: _update_epoch(state, _, seq_len, config, network),
                 update_state,
                 None,
                 config["UPDATE_EPOCHS"]
@@ -752,13 +777,15 @@ def make_train(config):
             metric["env_step"] = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
             jax.debug.callback(callback, metric)
 
-            runner_state = (train_state, env_state, last_obs, update_step, rng)
+            runner_state = (train_state, env_state, last_obs, update_step, rng, obs_history_0)
             return runner_state, metric
 
         rng, _rng = jax.random.split(rng)
-        runner_state = (train_state, env_state, obsv, 0, _rng)
+        # Initialize observation history for agent_0
+        initial_obs_history_0 = jnp.tile(obsv['agent_0'][:, None, :], (1, seq_len, 1))
+        runner_state = (train_state, env_state, obsv, 0, _rng, initial_obs_history_0)
         runner_state, metrics = jax.lax.scan(
-            lambda state, unused: _update_step(state, unused, pretrained_params),  
+            lambda state, unused: _update_step(state, unused, seq_len, pretrained_params),  
             runner_state,
             None,
             config["NUM_UPDATES"]
@@ -807,10 +834,10 @@ def main(config):
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
-        tags=["IPPO", "FF", "Adaptability", "Oracle", "Lower Bound"],
+        tags=["IPPO", "FF", "Adaptability", "Oracle", "Transforrmer"],
         config=config,
         mode=config["WANDB_MODE"],
-        name=f'lb_{layout_name}'
+        name=f'tf_ippo_oc_{layout_name}'
     )
 
     print("\nVerifying config before rollout:")
@@ -827,7 +854,7 @@ def main(config):
     config["ENV_KWARGS"]["layout"] = overcooked_layouts[layout_name]
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     date = datetime.now().strftime("%Y%m%d")
-    model_dir_name = f"lb_{layout_name}_{timestamp}"
+    model_dir_name = f"tf_ippo_oc_{layout_name}_{timestamp}"
     save_dir = os.path.join(
         "saved_models", 
         date,
@@ -845,13 +872,13 @@ def main(config):
 
     # Start training
     train_fn = make_train(config)
-    train_jit = jax.jit(lambda rng: train_fn(rng, pretrained_params))
+    train_jit = jax.jit(lambda rng: train_fn(rng, pretrained_params, config["SEQ_LEN"]))
     out = jax.vmap(train_jit)(rngs)
 
     # Generate and save visualization
     try:
         train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-        viz_base_name = f"lb_{layout_name}"
+        viz_base_name = f"lb_ippo_oc_{layout_name}"
         viz_filename = os.path.join(save_dir, f'{viz_base_name}_{config["SEED"]}.gif')
         create_visualization(train_state, pretrained_params, config, viz_filename, save_dir)
     except Exception as e:  
@@ -859,8 +886,8 @@ def main(config):
         traceback.print_exc()
 
     # Save parameters and results
-    save_training_results(save_dir, out, config, prefix="lb_")
-    np.savez(os.path.join(save_dir, "lb_metrics.npz"), 
+    save_training_results(save_dir, out, config, prefix="tf_ippo_oc_")
+    np.savez(os.path.join(save_dir, "tf_metrics.npz"), 
             **{key: np.array(value) for key, value in out["metrics"].items()})
     
     with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
@@ -909,7 +936,7 @@ def main(config):
         plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.grid()
 
-    learning_curve_name = f"lb_learning_curve"
+    learning_curve_name = f"tf_ippo_oc_learning_curve"
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f'{learning_curve_name}.png'))
     plt.close()

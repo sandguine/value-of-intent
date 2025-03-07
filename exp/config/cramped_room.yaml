@@ -1,7 +1,7 @@
 # General Experiment Settings
 SEED: 30                              
-NUM_SEEDS: 128                         
-LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250301/cramped_room/ub_ippo_oc_cramped_room_20250301_235342_30
+NUM_SEEDS: 1                         
+LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250301/cramped_room/ub_cramped_room_20250301_235342_30
 
 # Environment Settings
 ENV_NAME: "overcooked"                
@@ -24,7 +24,10 @@ CLIP_EPS: 0.2
 ENT_COEF: 0.01                        
 VF_COEF: 0.5                          
 MAX_GRAD_NORM: 0.5                    
-REW_SHAPING_HORIZON: 2.5e7            
+REW_SHAPING_HORIZON: 2.5e7           
+
+# Transformer Settings
+SEQ_LEN: 5
 
 # WandB Integration
 ENTITY: "sandily"                     

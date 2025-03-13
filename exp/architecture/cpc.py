@@ -58,3 +58,4 @@ z_future = jnp.stack([jnp.roll(z_embeddings, shift=-k-1, axis=1)[:, -1, :] for k
 
 cpc_loss = cpc_module(z_embeddings[:, -1, :], c_context, z_future)
 '''
+# total_loss = ppo_loss + λ * cpc_loss  # λ is a small scalar like 0.01

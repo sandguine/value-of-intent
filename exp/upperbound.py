@@ -6,18 +6,15 @@ Currently supports CNN and FF architectures.
 # Core imports for JAX machine learning
 import jax
 import jax.numpy as jnp
-import flax.linen as nn
-import numpy as np
 import optax
-from flax.linen.initializers import constant, orthogonal
-from typing import Sequence, NamedTuple, Dict, Type
+from typing import NamedTuple
 from flax.training.train_state import TrainState
-import distrax
 
 # Environment imports
 import jaxmarl
 from jaxmarl.environments.overcooked import overcooked_layouts
 from jaxmarl.viz.overcooked_visualizer import OvercookedVisualizer
+from jaxmarl.wrappers.baselines import LogWrapper
 
 # Configuration and logging imports
 import hydra
@@ -26,7 +23,6 @@ import wandb
 
 # Results saving imports
 import os
-import pickle
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -35,9 +31,9 @@ import sys
 import matplotlib.pyplot as plt
 
 # Local imports
-from value_of_intent.src.models.backbones.cnn import CNN
-from value_of_intent.src.models.backbones.ff import FeedForward
-from value_of_intent.src.models.actor_critic import ActorCritic
+from src.utils.data import get_network, batchify, unbatchify
+from src.utils.io import save_training_results
+from src.utils.viz import create_visualization, plot_learning_curves
 
 class Transition(NamedTuple):
     """Container for storing experience transitions"""
@@ -47,31 +43,6 @@ class Transition(NamedTuple):
     reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
-
-def get_network(config, action_dim):
-    """Factory function to create the appropriate network based on config"""
-    if config["ARCHITECTURE"].lower() == "cnn":
-        return ActorCritic(
-            action_dim=action_dim,
-            backbone_cls=CNN,
-            backbone_config={
-                "features": config["CNN_CONFIG"]["features"],
-                "kernel_sizes": config["CNN_CONFIG"]["kernel_sizes"],
-                "dense_features": config["CNN_CONFIG"]["dense_features"],
-                "activation": config["ACTIVATION"]
-            }
-        )
-    elif config["ARCHITECTURE"].lower() == "ff":
-        return ActorCritic(
-            action_dim=action_dim,
-            backbone_cls=FeedForward,
-            backbone_config={
-                "hidden_layers": config["FF_CONFIG"]["hidden_layers"],
-                "activation": config["ACTIVATION"]
-            }
-        )
-    else:
-        raise ValueError(f"Unknown architecture: {config['ARCHITECTURE']}")
 
 def get_rollout(train_state, config, save_dir=None):
     """Generate a single episode rollout for visualization"""
@@ -129,100 +100,6 @@ def get_rollout(train_state, config, save_dir=None):
     plt.close()
 
     return state_seq
-
-def batchify(x: dict, agent_list, num_actors):
-    """Convert dict of agent observations to batched array"""
-    x = jnp.stack([x[a] for a in agent_list])
-    return x.reshape((num_actors, -1))
-
-def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
-    """Convert batched array back to dict of agent observations"""
-    x = x.reshape((num_actors, num_envs, -1))
-    return {a: x[i] for i, a in enumerate(agent_list)}
-
-def save_training_results(save_dir, out, config):
-    """Save training results and metrics"""
-    os.makedirs(save_dir, exist_ok=True)
-
-    def is_pickleable(obj):
-        try:
-            pickle.dumps(obj)
-            return True
-        except Exception:
-            return False
-    
-    def process_tree(tree):
-        def convert_and_filter(x):
-            if isinstance(x, (jax.Array, np.ndarray)):
-                x = np.array(x)
-            return x if is_pickleable(x) else None
-        return jax.tree_util.tree_map(convert_and_filter, tree)
-    
-    # Convert outputs to numpy and save
-    numpy_out = jax.tree_util.tree_map(
-        lambda x: np.array(x) if isinstance(x, (jax.Array, np.ndarray)) else x,
-        jax.device_get(out)
-    )
-    
-    # Filter and save pickleable objects
-    pickle_safe_out = {k: v for k, v in numpy_out.items() if is_pickleable(v)}
-    
-    # Save complete output
-    with open(os.path.join(save_dir, "complete_out.pkl"), 'wb') as f:
-        pickle.dump(pickle_safe_out, f)
-    np.savez(os.path.join(save_dir, "complete_out.npz"), **pickle_safe_out)
-    
-    # Save metrics
-    if "metrics" in out:
-        np.savez(
-            os.path.join(save_dir, "metrics.npz"),
-            **{k: np.array(v) for k, v in out["metrics"].items()}
-        )
-    
-    # Save config
-    with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
-        pickle.dump(config, f)
-
-def create_visualization(train_state, config, filename, save_dir=None, agent_view_size=5):
-    """Create and save visualization of agent behavior"""
-    base_name = os.path.splitext(os.path.basename(filename))[0]
-    clean_filename = f"{base_name}.gif"
-    
-    state_seq = get_rollout(train_state, config, save_dir)
-    viz = OvercookedVisualizer()
-    
-    if save_dir:
-        clean_filename = os.path.join(save_dir, clean_filename)
-    viz.animate(state_seq, agent_view_size=agent_view_size, filename=clean_filename)
-
-def plot_learning_curves(rewards, config, save_dir):
-    """Plot and save learning curves"""
-    reward_mean = rewards.mean(0)
-    reward_std = rewards.std(0)
-    reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(reward_mean, label="Average Across All Seeds", color='black', linewidth=2)
-    plt.fill_between(
-        range(len(reward_mean)), 
-        reward_mean - reward_std_err,
-        reward_mean + reward_std_err,
-        alpha=0.2, color='gray', 
-        label="Mean ± Std Err"
-    )
-    
-    for seed_idx in range(config["NUM_SEEDS"]):
-        plt.plot(rewards[seed_idx], alpha=0.7)
-        
-    plt.xlabel("Update Step")
-    plt.ylabel("Returned Episode Returns")
-    plt.title("Per-Seed Performance on Returned Episode Returns")
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.grid(True)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "learning_curve.png"))
-    plt.close()
 
 def make_train(config):
     """Creates the main training function with the given config"""

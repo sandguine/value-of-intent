@@ -1,7 +1,25 @@
 # General Experiment Settings
 SEED: 30                              
-NUM_SEEDS: 64                         
+NUM_SEEDS: 10                         
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250301/counter_circuit/ub_counter_circuit_20250301_104620_30
+
+# Architecture Settings
+ARCHITECTURE: "cnn"                   # "cnn", "ff", "rnn"
+
+# CNN-specific parameters
+CNN_CONFIG:
+  features: [32, 32, 32]             # Number of features per conv layer
+  kernel_sizes: [[5, 5], [3, 3], [3, 3]]  # Kernel sizes per layer
+  dense_features: 64                 # Features in final dense layer
+
+# FF-specific parameters
+FF_CONFIG:
+  hidden_layers: [64, 64]            # Size of hidden layers
+
+# RNN-specific parameters
+RNN_CONFIG:
+  hidden_sizes: [64, 64]  # Size of hidden layers in RNN
+  dense_features: 64      # Size of final dense layer
 
 # Environment Settings
 ENV_NAME: "overcooked"                

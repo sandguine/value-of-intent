@@ -38,10 +38,9 @@ import sys
 import matplotlib.pyplot as plt
 
 # Local imports
-from value_of_intent.src.models.backbones.cnn import CNN
-from value_of_intent.src.models.backbones.rnn import RNN
-from value_of_intent.src.models.backbones.ff import FeedForward
-from value_of_intent.src.models.actor_critic import ActorCritic
+from src.utils.data import get_network
+from src.utils.io import save_training_results, load_training_results
+from src.utils.viz import create_visualization, plot_learning_curves
 
 class Transition(NamedTuple):
     """Container for storing experience transitions"""
@@ -51,46 +50,6 @@ class Transition(NamedTuple):
     reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
-
-def get_network(config, action_dim):
-    """Factory function to create the appropriate network based on config.
-    
-    In the lower bound implementation, this network is used for both:
-    - The learning agent (agent_0) with trainable parameters
-    - The fixed agent (agent_1) with pretrained parameters from upper bound
-    """
-    if config["ARCHITECTURE"].lower() == "cnn":
-        return ActorCritic(
-            action_dim=action_dim,
-            backbone_cls=CNN,
-            backbone_config={
-                "features": config["CNN_CONFIG"]["features"],
-                "kernel_sizes": config["CNN_CONFIG"]["kernel_sizes"],
-                "dense_features": config["CNN_CONFIG"]["dense_features"],
-                "activation": config["ACTIVATION"]
-            }
-        )
-    elif config["ARCHITECTURE"].lower() == "rnn":
-        return ActorCritic(
-            action_dim=action_dim,
-            backbone_cls=RNN,
-            backbone_config={
-                "hidden_sizes": config["RNN_CONFIG"]["hidden_sizes"],
-                "dense_features": config["RNN_CONFIG"]["dense_features"],
-                "activation": config["ACTIVATION"]
-            }
-        )
-    elif config["ARCHITECTURE"].lower() == "ff":
-        return ActorCritic(
-            action_dim=action_dim,
-            backbone_cls=FeedForward,
-            backbone_config={
-                "hidden_layers": config["FF_CONFIG"]["hidden_layers"],
-                "activation": config["ACTIVATION"]
-            }
-        )
-    else:
-        raise ValueError(f"Unknown architecture: {config['ARCHITECTURE']}")
 
 def get_rollout(train_state, agent_1_params, config, save_dir=None):
     """Generate a single episode rollout for visualization.
@@ -171,145 +130,6 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
     plt.close()
 
     return state_seq
-
-def batchify(x: dict, agent_list, num_actors):
-    """Convert dict of agent observations to batched array"""
-    x = jnp.stack([x[a] for a in agent_list])
-    return x.reshape((num_actors, -1))
-
-def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
-    """Convert batched array back to dict of agent observations"""
-    x = x.reshape((num_actors, num_envs, -1))
-    return {a: x[i] for i, a in enumerate(agent_list)}
-
-def save_training_results(save_dir, out, config):
-    """Save training results and metrics"""
-    os.makedirs(save_dir, exist_ok=True)
-
-    def is_pickleable(obj):
-        try:
-            pickle.dumps(obj)
-            return True
-        except Exception:
-            return False
-    
-    def process_tree(tree):
-        def convert_and_filter(x):
-            if isinstance(x, (jax.Array, np.ndarray)):
-                x = np.array(x)
-            return x if is_pickleable(x) else None
-        return jax.tree_util.tree_map(convert_and_filter, tree)
-    
-    # Convert outputs to numpy and save
-    numpy_out = jax.tree_util.tree_map(
-        lambda x: np.array(x) if isinstance(x, (jax.Array, np.ndarray)) else x,
-        jax.device_get(out)
-    )
-    
-    # Filter and save pickleable objects
-    pickle_safe_out = {k: v for k, v in numpy_out.items() if is_pickleable(v)}
-    
-    # Save complete output
-    with open(os.path.join(save_dir, "complete_out.pkl"), 'wb') as f:
-        pickle.dump(pickle_safe_out, f)
-    np.savez(os.path.join(save_dir, "complete_out.npz"), **pickle_safe_out)
-    
-    # Save metrics
-    if "metrics" in out:
-        np.savez(
-            os.path.join(save_dir, "metrics.npz"),
-            **{k: np.array(v) for k, v in out["metrics"].items()}
-        )
-    
-    # Save config
-    with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
-        pickle.dump(config, f)
-
-def load_training_results(load_dir, load_type="params", config=None):
-    """Load training results from specified directory"""
-    key = jax.random.PRNGKey(0)
-    key, subkey = jax.random.split(key)
-
-    if load_type == "params":
-        pickle_path = os.path.join(load_dir, "all_seeds_params.pkl")
-        if os.path.exists(pickle_path):
-            print("Loading params from pickle format...")
-            with open(pickle_path, 'rb') as f:
-                all_params = pickle.load(f)
-            
-            num_seeds = len(all_params.keys())
-            print("num seeds", num_seeds)
-
-            all_params = flax.core.freeze(all_params)
-            num_envs = config["NUM_ENVS"]
-
-            sampled_indices = jax.random.choice(subkey, num_seeds, shape=(num_envs,), replace=False)
-            print("sampled_indices", sampled_indices)
-
-            sampled_params_list = [{'params': all_params[f'seed_{i}']['params']} for i in sampled_indices]
-            sampled_params = jax.tree_util.tree_map(
-                lambda *x: jnp.stack(x, axis=0), *sampled_params_list
-            )
-
-            print("Successfully loaded pretrained model.")
-            print("Loaded params type:", type(sampled_params))
-            print("Shape of sampled_params:", jax.tree_util.tree_map(lambda x: x.shape, sampled_params))
-
-            return sampled_params
-                
-    elif load_type == "complete":
-        pickle_path = os.path.join(load_dir, "complete_out.pkl")
-        if os.path.exists(pickle_path):
-            print("Loading complete output from pickle format...")
-            with open(pickle_path, 'rb') as f:
-                out = pickle.load(f)
-                return jax.tree_util.tree_map(
-                    lambda x: jax.numpy.array(x) if isinstance(x, np.ndarray) else x,
-                    out
-                )
-    
-    raise FileNotFoundError(f"No saved {load_type} found in {load_dir}")
-
-def create_visualization(train_state, agent_1_params, config, filename, save_dir=None, agent_view_size=5):
-    """Create and save visualization of agent behavior"""
-    base_name = os.path.splitext(os.path.basename(filename))[0]
-    clean_filename = f"{base_name}.gif"
-    
-    state_seq = get_rollout(train_state, agent_1_params, config, save_dir)
-    viz = OvercookedVisualizer()
-    
-    if save_dir:
-        clean_filename = os.path.join(save_dir, clean_filename)
-    viz.animate(state_seq, agent_view_size=agent_view_size, filename=clean_filename)
-
-def plot_learning_curves(rewards, config, save_dir):
-    """Plot and save learning curves"""
-    reward_mean = rewards.mean(0)
-    reward_std = rewards.std(0)
-    reward_std_err = reward_std / np.sqrt(config["NUM_SEEDS"])
-
-    plt.figure(figsize=(10, 6))
-    plt.plot(reward_mean, label="Average Across All Seeds", color='black', linewidth=2)
-    plt.fill_between(
-        range(len(reward_mean)), 
-        reward_mean - reward_std_err,
-        reward_mean + reward_std_err,
-        alpha=0.2, color='gray', 
-        label="Mean ± Std Err"
-    )
-    
-    for seed_idx in range(config["NUM_SEEDS"]):
-        plt.plot(rewards[seed_idx], alpha=0.7)
-        
-    plt.xlabel("Update Step")
-    plt.ylabel("Returned Episode Returns")
-    plt.title("Per-Seed Performance on Returned Episode Returns")
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-    plt.grid(True)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(save_dir, "learning_curve.png"))
-    plt.close()
 
 def make_train(config):
     """Creates the main training function with the given config"""

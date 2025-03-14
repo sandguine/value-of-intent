@@ -12,14 +12,19 @@ results/
 docs/
 tmp/
 *-checkpoint.py
-wandb/
-outputs/
-models/
 *.sh
 slurm/
 .venv/
+
+# requirements
 requirements.txt
 requirements.in
 
 # excluded saved_models/ folder since pop training is large
 saved_models/
+outputs/
+wandb/
+
+# example notebooks
+example_download_wandb.ipynb
+params_content.ipynb

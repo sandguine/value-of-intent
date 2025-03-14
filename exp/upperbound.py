@@ -65,7 +65,9 @@ def get_rollout(train_state, config, save_dir=None):
         # Process observations based on architecture
         if config["ARCHITECTURE"].lower() == "cnn":
             obs_batch = jnp.stack([obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
-        else:
+        elif config["ARCHITECTURE"].lower() == "rnn":
+            obs_batch = obs.reshape(1, -1)  
+        elif config["ARCHITECTURE"].lower() == "ff":
             obs = {k: v.flatten() for k, v in obs.items()}
             obs_batch = jnp.stack([obs[a] for a in env.agents])
 
@@ -136,9 +138,12 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         
         # Initialize with proper observation shape
-        init_x = jnp.zeros(env.observation_space().shape)
         if config["ARCHITECTURE"].lower() == "ff":
-            init_x = init_x.flatten()
+            init_x = jnp.zeros((1, jnp.prod(env.observation_space().shape)))
+        elif config["ARCHITECTURE"].lower() == "rnn":
+            init_x = jnp.zeros((1, -1))
+        elif config["ARCHITECTURE"].lower() == "cnn":
+            init_x = jnp.zeros((1,) + env.observation_space().shape)
             
         network_params = network.init(_rng, init_x)
 
@@ -222,7 +227,9 @@ def make_train(config):
             # Process last observations based on architecture
             if config["ARCHITECTURE"].lower() == "cnn":
                 last_obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
-            else:
+            elif config["ARCHITECTURE"].lower() == "rnn":
+                last_obs_batch = last_obs.reshape(1, -1)
+            elif config["ARCHITECTURE"].lower() == "ff":
                 last_obs_batch = batchify({k: v.flatten() for k, v in last_obs.items()}, env.agents, config["NUM_ACTORS"])
             
             _, last_val = network.apply(train_state.params, last_obs_batch)

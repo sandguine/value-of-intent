@@ -11,8 +11,6 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from typing import Sequence, NamedTuple, Dict, Type
 from flax.training.train_state import TrainState
-import distrax
-import flax
 
 # Environment imports
 import jaxmarl
@@ -27,7 +25,6 @@ import wandb
 
 # Results saving imports
 import os
-import pickle
 from datetime import datetime
 from pathlib import Path
 import sys

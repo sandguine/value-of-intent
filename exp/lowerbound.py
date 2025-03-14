@@ -13,8 +13,6 @@ import optax
 from flax.linen.initializers import constant, orthogonal
 from typing import Sequence, NamedTuple, Dict, Type
 from flax.training.train_state import TrainState
-import distrax
-import flax
 
 # Environment imports
 import jaxmarl
@@ -29,7 +27,6 @@ import wandb
 
 # Results saving imports
 import os
-import pickle
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -89,7 +86,7 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
                 'agent_0': obs['agent_0'][None, :, :],  # Add batch dim but keep sequence dim
                 'agent_1': obs['agent_1'][None, :, :]
             }
-        else:  # feedforward case
+        elif config["ARCHITECTURE"].lower() == "ff":
             obs_batch = {
                 'agent_0': obs['agent_0'].flatten()[None, ...],
                 'agent_1': obs['agent_1'].flatten()[None, ...]
@@ -168,7 +165,9 @@ def make_train(config):
         # Initialize with proper observation shape based on architecture
         if config["ARCHITECTURE"].lower() == "cnn":
             init_x = jnp.zeros((1,) + env.observation_space().shape)
-        else:
+        elif config["ARCHITECTURE"].lower() == "rnn":
+            init_x = jnp.zeros((1, -1))
+        elif config["ARCHITECTURE"].lower() == "ff":
             init_x = jnp.zeros((1, np.prod(env.observation_space().shape)))
             
         network_params = network.init(_rng, init_x)

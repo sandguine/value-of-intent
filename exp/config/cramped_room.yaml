@@ -1,6 +1,6 @@
 # General Experiment Settings
 SEED: 30                              
-NUM_SEEDS: 64                         
+NUM_SEEDS: 64                      
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250313/cramped_room/ub_cnn_cramped_room_20250313_132138_30
 
 # Architecture Settings
@@ -21,28 +21,36 @@ RNN_CONFIG:
   hidden_sizes: [64, 64]  # Size of hidden layers in RNN
   dense_features: 64      # Size of final dense layer
 
+# CPC-specific parameters
+CPC_CONFIG:
+  temperature: 0.1
+  num_negatives: 32
+  num_future_steps: 8
+  projection_dim: 128
+  gru_hidden_dim: 256
+
 # Environment Settings
 ENV_NAME: "overcooked"                
 ENV_KWARGS: 
   layout: "cramped_room"             
 
-ACTIVATION: "relu"                    # tanh or relu
+ACTIVATION: "relu"                    # tanh or relu, relu for cnn
 
 # PPO Hyperparameters
 LR: 2.5e-4                           
 ANNEAL_LR: true                       
 NUM_ENVS: 64                          
 NUM_STEPS: 256                        
-TOTAL_TIMESTEPS: 4e8                  # 5e7 for lb and op, 4e8 for ub
+TOTAL_TIMESTEPS: 5e7                  # 4e8 for ff, 5e7 for cnn
 UPDATE_EPOCHS: 4                     
-NUM_MINIBATCHES: 16                    
+NUM_MINIBATCHES: 16                   # 4 for ff, 16 for cnn
 GAMMA: 0.99                           
 GAE_LAMBDA: 0.95                      
 CLIP_EPS: 0.2                        
 ENT_COEF: 0.01                        
 VF_COEF: 0.5                          
 MAX_GRAD_NORM: 0.5                    
-REW_SHAPING_HORIZON: 2.5e7           
+REW_SHAPING_HORIZON: 2.5e6               # 2.5e7 for ff, 2e4 for cnn
 
 # WandB Integration
 ENTITY: "sandily"                     

@@ -62,35 +62,82 @@ class CPCProjectionHead(nn.Module):
             bias_init=constant(0.0)
         )(x)
 
-def compute_cpc_loss(current_features, future_features, temperature=0.1):
-    """Compute CPC loss using current features to predict future observations.
+# def compute_cpc_loss(current_features, future_features, temperature=0.1):
+#     """Compute CPC loss using current features to predict future observations.
     
-    Args:
-        current_features: shape (batch_size, feature_dim)
-        future_features: shape (batch_size, num_future_steps, feature_dim)
-        temperature: scaling factor for similarity scores
-    """
-    # Normalize features
-    current_features = current_features / (jnp.linalg.norm(current_features, axis=-1, keepdims=True) + 1e-8)
-    future_features = future_features / (jnp.linalg.norm(future_features, axis=-1, keepdims=True) + 1e-8)
+#     Args:
+#         current_features: shape (batch_size, feature_dim)
+#         future_features: shape (batch_size, num_future_steps, feature_dim)
+#         temperature: scaling factor for similarity scores
+#     """
+#     # Normalize features
+#     current_features = current_features / (jnp.linalg.norm(current_features, axis=-1, keepdims=True) + 1e-8)
+#     future_features = future_features / (jnp.linalg.norm(future_features, axis=-1, keepdims=True) + 1e-8)
     
-    # Compute similarity scores - (batch_size, batch_size, num_future_steps)
-    similarity = jnp.einsum('bd,bfd->bf', current_features, future_features) / temperature
+#     # Compute similarity scores - (batch_size, batch_size, num_future_steps)
+#     similarity = jnp.einsum('bd,bfd->bf', current_features, future_features) / temperature
     
-    # Create positive labels (diagonal indices)
-    batch_size = current_features.shape[0]
-    labels = jnp.arange(batch_size)
+#     # Create positive labels (diagonal indices)
+#     batch_size = current_features.shape[0]
+#     labels = jnp.arange(batch_size)
     
-    # Compute InfoNCE loss for each future step
+#     # Compute InfoNCE loss for each future step
+#     losses = []
+#     for t in range(future_features.shape[1]):
+#         t_similarity = similarity[:, t]  # (batch_size, batch_size)
+#         loss = -jnp.mean(
+#             jax.nn.log_softmax(t_similarity)[jnp.arange(batch_size)]
+#         )
+#         losses.append(loss)
+    
+#     return jnp.mean(jnp.array(losses))
+
+# v2
+# def compute_cpc_loss(context, future_z, num_negatives=32, temperature=0.07):
+#     """
+#     context: [batch_size, latent_dim]
+#     future_features: [batch_size, num_future_steps, latent_dim]
+#     """
+#     batch_size, num_future, dim = future_features.shape
+
+#     # Normalize representations
+#     context = context / jnp.linalg.norm(context, axis=-1, keepdims=True)
+#     future_features = future_features / jnp.linalg.norm(future_features, axis=-1, keepdims=True)
+
+#     losses = []
+#     for k in range(num_future):
+#         positive = jnp.sum(context * future_features[:, k, :], axis=-1, keepdims=True)  # (B, 1)
+#         negatives = jnp.einsum('id,jkd->ij', context, future_features[:, k, :])  # negatives from batch
+#         logits = jnp.concatenate([positive, negatives], axis=1) / temperature
+#         labels = jnp.zeros(batch_size, dtype=int)  # Positives are at position 0
+#         loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels).mean()
+#         losses.append(loss)
+
+#     cpc_loss = jnp.mean(jnp.stack(losses))
+
+#     return cpc_loss
+
+# v3: supposedly follow oord closely
+def compute_cpc_loss(context, future_z, config):
+    temperature = config["CPC_CONFIG"]["temperature"]
+    num_future_steps = config["CPC_CONFIG"]["num_future_steps"]
+    projection_dim = config["CPC_CONFIG"]["projection_dim"]
+    gru_hidden_dim = config["CPC_CONFIG"]["gru_hidden_dim"]
+
+    batch_size, dim = future_z.shape
+    context = context / jnp.linalg.norm(context, axis=-1, keepdims=True)
+    future_z = future_z / jnp.linalg.norm(future_z, axis=-1, keepdims=True)
+
     losses = []
-    for t in range(future_features.shape[1]):
-        t_similarity = similarity[:, t]  # (batch_size, batch_size)
-        loss = -jnp.mean(
-            jax.nn.log_softmax(t_similarity)[jnp.arange(batch_size)]
-        )
-        losses.append(loss)
-    
-    return jnp.mean(jnp.array(losses))
+    for k in range(num_future_steps):
+        pred_future = self.Wk[k](context)
+        similarity = jnp.einsum('bd,nd->bn', pred_future, future_z[:, k])
+        similarity /= temperature
+        labels = jnp.arange(batch_size)
+        loss = optax.softmax_cross_entropy_with_integer_labels(similarity, labels)
+        losses.append(loss.mean())
+
+    return jnp.mean(jnp.stack(losses))
 
 def get_rollout(train_state, agent_1_params, config, save_dir=None):
     """Generate a single episode rollout for visualization.
@@ -250,11 +297,18 @@ def make_train(config):
                         'agent_0': last_obs['agent_0'],
                         'agent_1': last_obs['agent_1']
                     }
-                else:
+                elif config["ARCHITECTURE"].lower() == "rnn":
                     obs_batch = {
-                        'agent_0': last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1),
-                        'agent_1': last_obs['agent_1'].reshape(last_obs['agent_1'].shape[0], -1)
+                        'agent_0': last_obs['agent_0'],
+                        'agent_1': last_obs['agent_1']
                     }
+                elif config["ARCHITECTURE"].lower() == "ff":
+                    obs_batch = {
+                        'agent_0': last_obs['agent_0'].flatten(),
+                        'agent_1': last_obs['agent_1'].flatten()
+                    }
+                else:
+                    raise ValueError(f"Invalid architecture: {config['ARCHITECTURE']}")
 
                 # Get features and policy outputs for agent_0
                 pi_0, value_0, latent_features = network.apply(
@@ -325,6 +379,8 @@ def make_train(config):
             # Process last observations for value calculation
             if config["ARCHITECTURE"].lower() == "cnn":
                 last_obs_agent0 = last_obs['agent_0']
+            elif config["ARCHITECTURE"].lower() == "rnn":
+                last_obs_agent0 = last_obs['agent_0']
             else:
                 last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1)
 
@@ -388,17 +444,17 @@ def make_train(config):
                         
                         # CPC loss
                         cpc_loss = compute_cpc_loss(
-                            projected,
-                            traj_batch.future_features,
-                            config["CPC_TEMPERATURE"]
+                            traj_batch.projected_features, 
+                            traj_batch.future_features, 
+                            temperature=config["CPC_TEMPERATURE"]
                         )
                         
                         # Combine losses
                         total_loss = (
-                            actor_loss +
-                            config["VF_COEF"] * value_loss -
-                            config["ENT_COEF"] * entropy +
-                            config["CPC_COEF"] * cpc_loss
+                            actor_loss
+                            + config["VF_COEF"] * value_loss
+                            - config["ENT_COEF"] * entropy
+                            + config["CPC_COEF"] * cpc_loss
                         )
                         
                         return total_loss, (value_loss, actor_loss, entropy, cpc_loss)

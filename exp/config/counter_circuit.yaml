@@ -33,16 +33,16 @@ LR: 0.0005
 ANNEAL_LR: true                       
 NUM_ENVS: 64                         # 128 generally, try 64 for now
 NUM_STEPS: 256                        
-TOTAL_TIMESTEPS: 4e8                  # 5e7 for lb and op, 4e8 for ub
+TOTAL_TIMESTEPS: 2e5                  # 4e8 for ff, 2e5 for cnn
 UPDATE_EPOCHS: 4                      
-NUM_MINIBATCHES: 16                   # increased from 4 in FF to 16 in CNN
+NUM_MINIBATCHES: 16                   # 4 for ff, 16 for cnn
 GAMMA: 0.99                           
 GAE_LAMBDA: 0.95                      
 CLIP_EPS: 0.2                         
 ENT_COEF: 0.01                        
 VF_COEF: 0.5                          
 MAX_GRAD_NORM: 0.5                    
-REW_SHAPING_HORIZON: 2.5e7   
+REW_SHAPING_HORIZON: 2e4               # 2.5e7 for ff, 2e4 for cnn  
 
 # WandB Integration
 ENTITY: "sandily"                     

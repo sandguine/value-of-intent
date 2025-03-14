@@ -47,6 +47,27 @@ def save_training_results(save_dir, out, config):
     with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
         pickle.dump(config, f)
 
+def save_latent_embeddings(save_dir, latent_storage, action_storage):
+    """Save latent embeddings and associated actions."""
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Convert JAX arrays to NumPy
+    latent_storage = jax.device_get(jnp.concatenate(latent_storage, axis=0))
+    action_storage = jax.device_get(jnp.concatenate(action_storage, axis=0))
+
+    # Save as NPZ (compressed format for easy loading)
+    np.savez(
+        os.path.join(save_dir, "latent_embeddings.npz"),
+        latents=latent_storage,
+        actions=action_storage
+    )
+
+    # Save as Pickle for additional flexibility
+    with open(os.path.join(save_dir, "latent_embeddings.pkl"), 'wb') as f:
+        pickle.dump({"latents": latent_storage, "actions": action_storage}, f)
+
+    print(f"Latent embeddings saved to {save_dir}")
+
 def load_training_results(load_dir, load_type="params", config=None):
     """Load training results from specified directory"""
     key = jax.random.PRNGKey(0)

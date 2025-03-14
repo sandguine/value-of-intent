@@ -1,7 +1,6 @@
 """
 Unified implementation of Lower Bound PPO supporting multiple architectures.
-Currently supports CNN and FF architectures. In this implementation, only agent_0 learns
-while agent_1 uses fixed pretrained parameters from the upper bound.
+In this implementation, only agent_0 learns while agent_1 uses fixed pretrained parameters from the upper bound.
 """
 
 # Core imports for JAX machine learning

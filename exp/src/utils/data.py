@@ -1,4 +1,8 @@
 import jax.numpy as jnp
+import jax
+import jaxmarl
+import os
+import matplotlib.pyplot as plt
 from src.models.actor_critic import ActorCritic
 from src.models.backbones.cnn import CNN
 from src.models.backbones.rnn import RNN
@@ -43,7 +47,7 @@ def get_network(config, action_dim):
         )
     else:
         raise ValueError(f"Unknown architecture: {config['ARCHITECTURE']}")
-    
+
 def batchify(x: dict, agent_list, num_actors):
     """Convert dict of agent observations to batched array"""
     x = jnp.stack([x[a] for a in agent_list])

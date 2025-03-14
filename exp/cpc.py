@@ -1,7 +1,5 @@
 """
-Unified implementation of Lower Bound PPO supporting multiple architectures.
-Currently supports CNN and FF architectures. In this implementation, only agent_0 learns
-while agent_1 uses fixed pretrained parameters from the upper bound.
+Implementation of PPO with CPC Loss.
 """
 
 # Core imports for JAX machine learning
@@ -39,28 +37,69 @@ import matplotlib.pyplot as plt
 
 # Local imports
 from value_of_intent.src.models.backbones.cnn import CNN
-from value_of_intent.src.models.backbones.rnn import RNN
 from value_of_intent.src.models.backbones.ff import FeedForward
+from value_of_intent.src.models.backbones.rnn import RNN
 from value_of_intent.src.models.actor_critic import ActorCritic
 
 class Transition(NamedTuple):
-    """Container for storing experience transitions"""
+    """Container for storing experience transitions with CPC support"""
     done: jnp.ndarray
     action: jnp.ndarray
     value: jnp.ndarray
     reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
+    latent_features: jnp.ndarray  # Features from backbone network
+    projected_features: jnp.ndarray  # Features after projection head
+    future_features: jnp.ndarray  # Sequence of future latent features
+
+class CPCProjectionHead(nn.Module):
+    """Projection head for CPC features"""
+    hidden_dim: int = 128
+
+    @nn.compact
+    def __call__(self, x):
+        # Removed ReLU to avoid gradient bottlenecks
+        return nn.Dense(
+            features=self.hidden_dim,
+            kernel_init=orthogonal(1.0),
+            bias_init=constant(0.0)
+        )(x)
+
+def compute_cpc_loss(current_features, future_features, temperature=0.1):
+    """Compute CPC loss using current features to predict future observations.
+    
+    Args:
+        current_features: shape (batch_size, feature_dim)
+        future_features: shape (batch_size, num_future_steps, feature_dim)
+        temperature: scaling factor for similarity scores
+    """
+    # Normalize features
+    current_features = current_features / (jnp.linalg.norm(current_features, axis=-1, keepdims=True) + 1e-8)
+    future_features = future_features / (jnp.linalg.norm(future_features, axis=-1, keepdims=True) + 1e-8)
+    
+    # Compute similarity scores - (batch_size, batch_size, num_future_steps)
+    similarity = jnp.einsum('bd,bfd->bf', current_features, future_features) / temperature
+    
+    # Create positive labels (diagonal indices)
+    batch_size = current_features.shape[0]
+    labels = jnp.arange(batch_size)
+    
+    # Compute InfoNCE loss for each future step
+    losses = []
+    for t in range(future_features.shape[1]):
+        t_similarity = similarity[:, t]  # (batch_size, batch_size)
+        loss = -jnp.mean(
+            jax.nn.log_softmax(t_similarity)[jnp.arange(batch_size)]
+        )
+        losses.append(loss)
+    
+    return jnp.mean(jnp.array(losses))
 
 def get_network(config, action_dim):
-    """Factory function to create the appropriate network based on config.
-    
-    In the lower bound implementation, this network is used for both:
-    - The learning agent (agent_0) with trainable parameters
-    - The fixed agent (agent_1) with pretrained parameters from upper bound
-    """
+    """Factory function to create the appropriate network"""
     if config["ARCHITECTURE"].lower() == "cnn":
-        return ActorCritic(
+        network = ActorCritic(
             action_dim=action_dim,
             backbone_cls=CNN,
             backbone_config={
@@ -70,6 +109,8 @@ def get_network(config, action_dim):
                 "activation": config["ACTIVATION"]
             }
         )
+        projection_head = CPCProjectionHead()
+        return network, projection_head
     elif config["ARCHITECTURE"].lower() == "rnn":
         return ActorCritic(
             action_dim=action_dim,
@@ -103,7 +144,7 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
     """
     # Initialize environment
     env = jaxmarl.make(config["ENV_NAME"], **config["ENV_KWARGS"])
-    network = get_network(config, env.action_space().n)
+    network, projection_head = get_network(config, env.action_space().n)
     
     key = jax.random.PRNGKey(0)
     key, key_r, key_a = jax.random.split(key, 3)
@@ -342,7 +383,7 @@ def make_train(config):
     def train(rng, pretrained_params):
         """Main training loop"""
         # Initialize network and optimizer
-        network = get_network(config, env.action_space().n)
+        network, projection_head = get_network(config, env.action_space().n)
         rng, _rng = jax.random.split(rng)
         
         # Initialize with proper observation shape based on architecture
@@ -383,46 +424,59 @@ def make_train(config):
                 train_state, env_state, last_obs, update_step, rng = runner_state
                 rng, rng_action_1, rng_action_0, rng_step = jax.random.split(rng, 4)
 
-                # Process observations based on architecture
+                # Process observations and extract features
                 if config["ARCHITECTURE"].lower() == "cnn":
                     obs_batch = {
-                        'agent_0': last_obs['agent_0'],  # Keep spatial dimensions for CNN
+                        'agent_0': last_obs['agent_0'],
                         'agent_1': last_obs['agent_1']
                     }
-                elif config["ARCHITECTURE"].lower() == "rnn":
-                    # For RNN, we need to maintain the sequence dimension
-                    # Assuming obs shape is (seq_len, *feature_dims)
-                    obs_batch = {
-                        'agent_0': last_obs['agent_0'][None, :, :],  # Add batch dim but keep sequence dim
-                        'agent_1': last_obs['agent_1'][None, :, :]
-                    }
-                else:  # feedforward case
+                else:
                     obs_batch = {
                         'agent_0': last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1),
                         'agent_1': last_obs['agent_1'].reshape(last_obs['agent_1'].shape[0], -1)
                     }
 
-                # Agent 1 (fixed partner) uses pretrained parameters
-                agent_1_action = jax.vmap(
-                    lambda params, obs, rng: network.apply(params, obs[None, ...])[0].sample(seed=rng),
-                    in_axes=(0, 0, 0)
-                )(pretrained_params, obs_batch['agent_1'], jax.random.split(rng_action_1, obs_batch['agent_1'].shape[0]))
+                # Get features and policy outputs for agent_0
+                pi_0, value_0, latent_features = network.apply(
+                    train_state.params.network,
+                    obs_batch['agent_0'],
+                    return_features=True
+                )
+                projected_features = projection_head.apply(
+                    train_state.params.projection_head,
+                    latent_features
+                )
 
-                # Agent 0 (learning agent) uses current training parameters
-                pi_0, value_0 = network.apply(train_state.params, obs_batch['agent_0'])
+                # Get actions
                 action_0 = pi_0.sample(seed=rng_action_0)
                 log_prob_0 = pi_0.log_prob(action_0)
 
-                actions = {"agent_0": action_0, "agent_1": agent_1_action}
+                # Agent 1 uses pretrained parameters
+                pi_1, _ = network.apply(pretrained_params, obs_batch['agent_1'])
+                action_1 = pi_1.sample(seed=rng_action_1)
 
-                # Step environment forward
-                next_obs, next_env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0))(
+                actions = {"agent_0": action_0, "agent_1": action_1}
+
+                # Step environment
+                next_obs, next_env_state, reward, done, info = jax.vmap(env.step)(
                     jax.random.split(rng_step, config["NUM_ENVS"]),
                     env_state,
-                    actions,
+                    actions
                 )
 
-                # Create transition for learning agent (agent_0)
+                # Get future features for CPC
+                future_obs_sequence = next_obs['agent_0']  # Shape: (batch, future_steps, obs_dim)
+                _, _, future_latent = jax.vmap(lambda x: network.apply(
+                    train_state.params.network,
+                    x,
+                    return_features=True
+                ))(future_obs_sequence)
+                
+                future_projected = jax.vmap(lambda x: projection_head.apply(
+                    train_state.params.projection_head,
+                    x
+                ))(future_latent)
+
                 transition = Transition(
                     done=done["agent_0"],
                     action=action_0,
@@ -430,6 +484,9 @@ def make_train(config):
                     reward=reward["agent_0"],
                     log_prob=log_prob_0,
                     obs=obs_batch['agent_0'],
+                    latent_features=latent_features,
+                    projected_features=projected_features,
+                    future_features=future_projected
                 )
 
                 runner_state = (train_state, next_env_state, next_obs, update_step, rng)
@@ -452,7 +509,7 @@ def make_train(config):
                 last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1)
 
             # Get last value for advantage calculation
-            _, last_val = network.apply(train_state.params, last_obs_agent0)
+            _, last_val = network.apply(train_state.params.network, last_obs_agent0)
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):
@@ -479,39 +536,56 @@ def make_train(config):
                     traj_batch, advantages, targets = batch_info
 
                     def _loss_fn(params, traj_batch, gae, targets):
-                        pi, value = network.apply(params, traj_batch.obs)
+                        """Compute combined PPO and CPC loss"""
+                        network_params, projection_params = params
+                        
+                        # Get policy outputs and features
+                        pi, value, latent = network.apply(
+                            network_params,
+                            traj_batch.obs,
+                            return_features=True
+                        )
                         log_prob = pi.log_prob(traj_batch.action)
-
-                        # Value loss
-                        value_pred_clipped = traj_batch.value + (
-                            value - traj_batch.value
-                        ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
-                        value_losses = jnp.square(value - targets)
-                        value_losses_clipped = jnp.square(value_pred_clipped - targets)
-                        value_loss = 0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
-
-                        # Actor loss
+                        
+                        # Project features
+                        projected = projection_head.apply(
+                            projection_params,
+                            latent
+                        )
+                        
+                        # Standard PPO losses
+                        value_loss = 0.5 * jnp.square(value - targets).mean()
+                        
+                        # Actor loss with clipping
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
                         gae = (gae - gae.mean()) / (gae.std() + 1e-8)
-                        loss_actor1 = ratio * gae
-                        loss_actor2 = jnp.clip(
-                            ratio,
-                            1.0 - config["CLIP_EPS"],
-                            1.0 + config["CLIP_EPS"],
-                        ) * gae
-                        loss_actor = -jnp.minimum(loss_actor1, loss_actor2).mean()
+                        actor_loss1 = ratio * gae
+                        actor_loss2 = jnp.clip(ratio, 1 - config["CLIP_EPS"], 1 + config["CLIP_EPS"]) * gae
+                        actor_loss = -jnp.minimum(actor_loss1, actor_loss2).mean()
+                        
+                        # Entropy bonus
                         entropy = pi.entropy().mean()
-
-                        total_loss = (
-                            loss_actor
-                            + config["VF_COEF"] * value_loss
-                            - config["ENT_COEF"] * entropy
+                        
+                        # CPC loss
+                        cpc_loss = compute_cpc_loss(
+                            projected,
+                            traj_batch.future_features,
+                            config["CPC_TEMPERATURE"]
                         )
-                        return total_loss, (value_loss, loss_actor, entropy)
+                        
+                        # Combine losses
+                        total_loss = (
+                            actor_loss +
+                            config["VF_COEF"] * value_loss -
+                            config["ENT_COEF"] * entropy +
+                            config["CPC_COEF"] * cpc_loss
+                        )
+                        
+                        return total_loss, (value_loss, actor_loss, entropy, cpc_loss)
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
                     total_loss, grads = grad_fn(
-                        train_state.params, traj_batch, advantages, targets
+                        (train_state.params.network, train_state.params.projection_head), traj_batch, advantages, targets
                     )
                     train_state = train_state.apply_gradients(grads=grads)
                     return train_state, total_loss
@@ -580,9 +654,16 @@ def make_train(config):
 
     return train
 
-@hydra.main(version_base=None, config_path="config", config_name="adapt_asymm")
+@hydra.main(version_base=None, config_path="config", config_name="cpc")
 def main(config):
-    """Main entry point for training"""
+    # Add CPC-specific config
+    config.update({
+        "CPC_COEF": 0.1,  # Weight for CPC loss
+        "CPC_TEMPERATURE": 0.1,  # Temperature for similarity scaling
+        "CPC_FUTURE_STEPS": 8,  # Number of future steps to predict
+        "CPC_PROJECTION_DIM": 128,  # Dimension of projected features
+    })
+    
     # Set up Python path
     project_root = Path(__file__).resolve().parents[3]
     if str(project_root) not in sys.path:

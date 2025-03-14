@@ -1,5 +1,5 @@
 """
-Implementation of Lower Bound PPO with CNN architecture.
+Implementation of PPO with CNN architecture and Contrastive Predictive Coding (CPC).
 """
 
 # Core imports for JAX machine learning
@@ -43,102 +43,68 @@ import matplotlib.pyplot as plt
 from functools import partial
 
 class CNN(nn.Module):
-    """CNN module for processing visual observations"""
+    """CNN module with CPC embedding layer"""
     activation: str = "tanh"
+    embedding_dim: int = 128  # New parameter for CPC embedding dimension
 
     @nn.compact
     def __call__(self, x):
         # Select activation function
         act_fn = nn.relu if self.activation == "relu" else nn.tanh
         
-        # First convolution layer
-        x = nn.Conv(
-            features=32,
-            kernel_size=(5, 5),
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-            name="conv1"
-        )(x)
+        # CNN layers (same as before)
+        x = nn.Conv(features=32, kernel_size=(5, 5),
+                   kernel_init=orthogonal(np.sqrt(2)),
+                   bias_init=constant(0.0))(x)
         x = act_fn(x)
         
-        # Second convolution layer
-        x = nn.Conv(
-            features=32,
-            kernel_size=(3, 3),
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-            name="conv2"
-        )(x)
+        x = nn.Conv(features=32, kernel_size=(3, 3),
+                   kernel_init=orthogonal(np.sqrt(2)),
+                   bias_init=constant(0.0))(x)
         x = act_fn(x)
         
-        # Third convolution layer
-        x = nn.Conv(
-            features=32,
-            kernel_size=(3, 3),
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-            name="conv3"
-        )(x)
+        x = nn.Conv(features=32, kernel_size=(3, 3),
+                   kernel_init=orthogonal(np.sqrt(2)),
+                   bias_init=constant(0.0))(x)
         x = act_fn(x)
         
         # Flatten output
         x = x.reshape((x.shape[0], -1))
         
-        # Final dense layer
-        x = nn.Dense(
-            features=64,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-            name="cnn_dense"
-        )(x)
+        # Dense layer
+        x = nn.Dense(features=64,
+                    kernel_init=orthogonal(np.sqrt(2)),
+                    bias_init=constant(0.0))(x)
         x = act_fn(x)
         
-        return x
+        # New CPC embedding layer
+        embedding = nn.Dense(features=self.embedding_dim,
+                           kernel_init=orthogonal(np.sqrt(2)),
+                           bias_init=constant(0.0))(x)
+        
+        return x, embedding
 
 class ActorCritic(nn.Module):
-    """Actor-Critic network with CNN backbone"""
+    """Actor-Critic network with CPC embedding"""
     action_dim: Sequence[int]
     activation: str = "tanh"
+    embedding_dim: int = 128
 
     def setup(self):
-        # CNN backbone
-        self.cnn = CNN(activation=self.activation)
+        self.cnn = CNN(activation=self.activation, embedding_dim=self.embedding_dim)
         
         # Actor network layers
-        self.actor_dense = nn.Dense(
-            64,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-            name="actor_dense"
-        )
-        self.actor_out = nn.Dense(
-            self.action_dim,
-            kernel_init=orthogonal(0.01),
-            bias_init=constant(0.0),
-            name="actor_out"
-        )
+        self.actor_dense = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)))
+        self.actor_out = nn.Dense(self.action_dim, kernel_init=orthogonal(0.01))
         
         # Critic network layers
-        self.critic_dense = nn.Dense(
-            64,
-            kernel_init=orthogonal(np.sqrt(2)),
-            bias_init=constant(0.0),
-            name="critic_dense"
-        )
-        self.critic_out = nn.Dense(
-            1,
-            kernel_init=orthogonal(1.0),
-            bias_init=constant(0.0),
-            name="critic_out"
-        )
+        self.critic_dense = nn.Dense(64, kernel_init=orthogonal(np.sqrt(2)))
+        self.critic_out = nn.Dense(1, kernel_init=orthogonal(1.0))
         
-        # Set activation function
         self.act_fn = nn.relu if self.activation == "relu" else nn.tanh
 
-    @nn.compact
     def __call__(self, x):
-        # CNN feature extraction
-        features = self.cnn(x)
+        features, embedding = self.cnn(x)
         
         # Actor head
         actor = self.actor_dense(features)
@@ -151,8 +117,48 @@ class ActorCritic(nn.Module):
         critic = self.act_fn(critic)
         critic = self.critic_out(critic)
         
-        return pi, jnp.squeeze(critic, axis=-1)
+        return pi, jnp.squeeze(critic, axis=-1), embedding
+
+def compute_cpc_loss(embeddings, config):
+    """Compute CPC loss using InfoNCE"""
+    batch_size = embeddings.shape[0]
+    seq_len = embeddings.shape[1]
     
+    # Normalize embeddings
+    embeddings = embeddings / jnp.linalg.norm(embeddings, axis=-1, keepdims=True)
+    
+    # Prepare positive and negative samples
+    # Use current embedding to predict k steps ahead
+    k_steps = config["CPC_PREDICTION_STEPS"]
+    total_loss = 0.0
+    
+    for k in range(1, k_steps + 1):
+        # Prepare context and targets
+        context = embeddings[:, :-k]  # Current embeddings
+        targets = embeddings[:, k:]   # Future embeddings
+        
+        # Compute similarity scores
+        similarity = jnp.einsum('bte,bse->bts', context, targets)
+        
+        # Create positive and negative masks
+        pos_mask = jnp.eye(similarity.shape[1])
+        neg_mask = 1.0 - pos_mask
+        
+        # Compute InfoNCE loss
+        pos_similarity = similarity * pos_mask
+        neg_similarity = similarity * neg_mask
+        
+        # Temperature scaling
+        temperature = config["CPC_TEMPERATURE"]
+        logits = similarity / temperature
+        
+        # Compute loss using cross-entropy
+        labels = jnp.eye(similarity.shape[1])
+        loss = optax.softmax_cross_entropy(logits, labels)
+        
+        total_loss += loss.mean()
+    
+    return total_loss / k_steps
 
 class Transition(NamedTuple):
     """Container for storing experience transitions"""
@@ -162,6 +168,7 @@ class Transition(NamedTuple):
     reward: jnp.ndarray
     log_prob: jnp.ndarray
     obs: jnp.ndarray
+    embedding: jnp.ndarray  # Added embedding field
 
 def get_rollout(train_state, agent_1_params, config, save_dir=None):
     """Generate a single episode rollout for visualization"""
@@ -262,7 +269,11 @@ def make_train(config):
     def train(rng, pretrained_params):
         """Main training loop"""
         # Initialize network and optimizer
-        network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"])
+        network = ActorCritic(
+            env.action_space().n, 
+            activation=config["ACTIVATION"],
+            embedding_dim=config["EMBEDDING_DIM"]
+        )
         rng, _rng = jax.random.split(rng)
         
         # Initialize with proper observation shape for CNN
@@ -314,7 +325,7 @@ def make_train(config):
                 agent_0_obs = last_obs['agent_0']  # Keep spatial dimensions
 
                 # Apply agent_0 policy using trainable parameters
-                agent_0_pi, agent_0_value = network.apply(train_state.params, agent_0_obs)
+                agent_0_pi, agent_0_value, agent_0_embedding = network.apply(train_state.params, agent_0_obs)
                 agent_0_action = agent_0_pi.sample(seed=rng_action_0)
                 agent_0_log_prob = agent_0_pi.log_prob(agent_0_action)
 
@@ -326,7 +337,7 @@ def make_train(config):
                     actions,
                 )
 
-                # Create transition
+                # Create transition with embedding
                 transition = Transition(
                     done=done["agent_0"],
                     action=agent_0_action,
@@ -334,6 +345,7 @@ def make_train(config):
                     reward=reward["agent_0"],
                     log_prob=agent_0_log_prob,
                     obs=agent_0_obs,
+                    embedding=agent_0_embedding,
                 )
 
                 runner_state = (train_state, next_env_state, next_obs, update_step, rng)
@@ -383,7 +395,7 @@ def make_train(config):
                     targets = agent_0_data['targets']
 
                     def _loss_fn(params, traj_batch, gae, targets, config):
-                        pi, value = network.apply(params, traj_batch.obs)
+                        pi, value, embeddings = network.apply(params, traj_batch.obs)
                         log_prob = pi.log_prob(traj_batch.action)
 
                         # Value loss calculation
@@ -404,16 +416,21 @@ def make_train(config):
 
                         entropy = pi.entropy().mean()
 
+                        # CPC loss calculation
+                        cpc_loss = compute_cpc_loss(embeddings, config)
+
                         total_loss = (
                             loss_actor
                             + config["VF_COEF"] * value_loss
                             - config["ENT_COEF"] * entropy
+                            + config["CPC_COEF"] * cpc_loss
                         )
 
                         return total_loss, {
                             'value_loss': value_loss,
                             'actor_loss': loss_actor,
                             'entropy': entropy,
+                            'cpc_loss': cpc_loss,
                             'total_loss': total_loss
                         }
 
@@ -672,6 +689,16 @@ def main(config):
     config = OmegaConf.to_container(config)
     layout_name = config["ENV_KWARGS"]["layout"]
     config["ENV_KWARGS"]["layout"] = overcooked_layouts[layout_name]
+
+    # Add CPC-specific configuration if not present
+    if "CPC_COEF" not in config:
+        config["CPC_COEF"] = 1.0
+    if "CPC_PREDICTION_STEPS" not in config:
+        config["CPC_PREDICTION_STEPS"] = 3
+    if "CPC_TEMPERATURE" not in config:
+        config["CPC_TEMPERATURE"] = 0.1
+    if "EMBEDDING_DIM" not in config:
+        config["EMBEDDING_DIM"] = 128
 
     # Initialize wandb
     wandb.init(

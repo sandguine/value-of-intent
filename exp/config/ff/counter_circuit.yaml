@@ -1,6 +1,6 @@
 # General Experiment Settings
 SEED: 30                              
-NUM_SEEDS: 64                         
+NUM_SEEDS: 128                         
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250301/counter_circuit/ub_counter_circuit_20250301_104620_30
 
 # Environment Settings
@@ -8,23 +8,26 @@ ENV_NAME: "overcooked"
 ENV_KWARGS: 
   layout: "counter_circuit"         
 
-ACTIVATION: "relu"                    # tanh or relu, use relu in CNN
+ACTIVATION: "tanh"                    # tanh or relu
 
 # PPO Hyperparameters
-LR: 0.0005                          
+LR: 0.0001                          
 ANNEAL_LR: true                       
-NUM_ENVS: 64                         # 128 generally, try 64 for now
-NUM_STEPS: 256                        
+NUM_ENVS: 128                         # 128 for ub
+NUM_STEPS: 128                        
 TOTAL_TIMESTEPS: 4e8                  # 5e7 for lb and op, 4e8 for ub
 UPDATE_EPOCHS: 4                      
-NUM_MINIBATCHES: 16                   # increased from 4 in FF to 16 in CNN
-GAMMA: 0.99                           
+NUM_MINIBATCHES: 4                    
+GAMMA: 0.98                           
 GAE_LAMBDA: 0.95                      
 CLIP_EPS: 0.2                         
-ENT_COEF: 0.01                        
+ENT_COEF: 0.05                        
 VF_COEF: 0.5                          
 MAX_GRAD_NORM: 0.5                    
 REW_SHAPING_HORIZON: 2.5e7   
+
+# Transformer Settings
+SEQ_LEN: 5
 
 # WandB Integration
 ENTITY: "sandily"                     

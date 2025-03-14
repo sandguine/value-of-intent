@@ -1,0 +1,26 @@
+program: baselines/IPPO/overcooked/baseline_ff_ippo_overcooked.py # change to real file likely train.py
+method: grid
+metric:
+  name: mean_episode_reward
+  goal: maximize
+
+parameters:
+  LR:
+    values: [1e-5, 1e-4, 1e-3]
+  ENT_COEF:
+    values: [0.01, 0.05]
+  NUM_ENVS:
+    values: [128, 256]
+  # GAMMA:
+  #   values: [0.98, 0.99, 0.995]
+  # NUM_STEPS:
+  #   values: [128, 256]
+  # CLIP_EPS:
+  #   values: [0.1, 0.2, 0.3]
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - "--config-name=base_config"
+  - ${args_no_hyphens}

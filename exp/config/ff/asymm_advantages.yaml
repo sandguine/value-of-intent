@@ -1,0 +1,35 @@
+# General Experiment Settings
+SEED: 30                              
+NUM_SEEDS: 128                         
+LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250301/asymm_advantages/ub_asymm_advantages_20250301_104318_30/
+
+# Environment Settings
+ENV_NAME: "overcooked"                
+ENV_KWARGS: 
+  layout: "asymm_advantages"         
+
+ACTIVATION: "tanh"                    # tanh or relu
+
+# PPO Hyperparameters
+LR: 0.000025                          
+ANNEAL_LR: true                       
+NUM_ENVS: 128                          # 128 for ub, 16 for lb and op
+NUM_STEPS: 128                        
+TOTAL_TIMESTEPS: 4e8                  # 5e7 for lb and op, 4e8 for ub
+UPDATE_EPOCHS: 4                      
+NUM_MINIBATCHES: 4                    
+GAMMA: 0.98                           
+GAE_LAMBDA: 0.95                      
+CLIP_EPS: 0.1                         
+ENT_COEF: 0.02                        
+VF_COEF: 0.5                          
+MAX_GRAD_NORM: 0.5                    
+REW_SHAPING_HORIZON: 2.5e7            
+
+# Transformer Settings
+SEQ_LEN: 5
+
+# WandB Integration
+ENTITY: "sandily"                     
+PROJECT: "comparisons"                
+WANDB_MODE: "online"                 

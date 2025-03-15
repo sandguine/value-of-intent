@@ -1,21 +1,48 @@
 # General Experiment Settings
 SEED: 30                             
-NUM_SEEDS: 128                        # 128 for all, used 64 for now
+NUM_SEEDS: 64                        # 128 for all, used 64 for now
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250228/coord_ring/ub_coord_ring_20250228_165554_30
+
+# Architecture Settings
+ARCHITECTURE: "cnn"                   # "cnn" or "ff"
+
+# CNN-specific parameters
+CNN_CONFIG:
+  features: [32, 32, 32]             # Number of features per conv layer
+  kernel_sizes: [[5, 5], [3, 3], [3, 3]]  # Kernel sizes per layer
+  dense_features: 64                 # Features in final dense layer
+
+# FF-specific parameters
+FF_CONFIG:
+  hidden_layers: [64, 64]            # Size of hidden layers
+
+# RNN-specific parameters
+RNN_CONFIG:
+  hidden_sizes: [64, 64]  # Size of hidden layers in RNN
+  dense_features: 64      # Size of final dense layer
+
+# CPC-specific parameters
+CPC_CONFIG:
+  temperature: 0.1
+  num_negatives: 32
+  num_future_steps: 8
+  projection_dim: 128
+  gru_hidden_dim: 256
+  
 
 # Environment Settings
 ENV_NAME: "overcooked"                
 ENV_KWARGS: 
   layout: "coord_ring"                
 
-ACTIVATION: "tanh"                    
+ACTIVATION: "relu"                    
 
 # PPO Hyperparameters
-LR: 0.00005                           
+LR: 6e-4                          
 ANNEAL_LR: true                       
-NUM_ENVS: 128                         # 128 for all, used 64 for now
-NUM_STEPS: 128                        
-TOTAL_TIMESTEPS: 4e8                  # 4e8 for all
+NUM_ENVS: 64                         # 128 for all, used 64 for now
+NUM_STEPS: 256                        
+TOTAL_TIMESTEPS: 5e7                  # 4e8 for all, 5e7 for cnn
 UPDATE_EPOCHS: 4                      
 NUM_MINIBATCHES: 4                    
 GAMMA: 0.99                           # 0.99 or 0.98 seem to both work okay
@@ -24,7 +51,7 @@ CLIP_EPS: 0.2
 ENT_COEF: 0.05                        # 0.05 intuition might get better because preventing getting stuck in local_min
 VF_COEF: 0.5                          
 MAX_GRAD_NORM: 0.5                    
-REW_SHAPING_HORIZON: 2.5e7      
+REW_SHAPING_HORIZON: 3.5e6      
 
 # Transformer Settings
 SEQ_LEN: 5

@@ -1,7 +1,7 @@
 # General Experiment Settings
 SEED: 30                              
 NUM_SEEDS: 64                      
-LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250313/cramped_room/ub_cnn_cramped_room_20250313_132138_30
+LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250314/cramped_room/ub_cnn_cramped_room_20250314_133108_30
 
 # Architecture Settings
 ARCHITECTURE: "cnn"                   # "cnn" or "ff"
@@ -23,11 +23,13 @@ RNN_CONFIG:
 
 # CPC-specific parameters
 CPC_CONFIG:
-  temperature: 0.1
+  temperature: 0.1 # try between 0.1 and 0.5
   num_negatives: 32
-  num_future_steps: 8
+  num_future_steps: 3
   projection_dim: 128
   gru_hidden_dim: 256
+  cpc_coef: 0.1  # Set to 0.0 to ablate CPC loss
+  visualize_every: 10000  # Steps between representation visualizations
 
 # Environment Settings
 ENV_NAME: "overcooked"                

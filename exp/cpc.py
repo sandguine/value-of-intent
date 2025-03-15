@@ -33,9 +33,12 @@ import sys
 import matplotlib.pyplot as plt
 
 # Local imports
-from src.utils.data import get_network, batchify, unbatchify
+from src.utils.data import get_network
 from src.utils.io import save_training_results, load_training_results
-from src.utils.viz import create_visualization, plot_learning_curves
+from src.utils.viz import plot_learning_curves
+
+import umap
+from sklearn.preprocessing import StandardScaler
 
 class Transition(NamedTuple):
     """Container for storing experience transitions with CPC support"""
@@ -48,6 +51,18 @@ class Transition(NamedTuple):
     latent_features: jnp.ndarray  # Features from backbone network
     projected_features: jnp.ndarray  # Features after projection head
     future_features: jnp.ndarray  # Sequence of future latent features
+
+def create_visualization(train_state, config, filename, save_dir=None, agent_view_size=5):
+    """Create and save visualization of agent behavior"""
+    base_name = os.path.splitext(os.path.basename(filename))[0]
+    clean_filename = f"{base_name}.gif"
+    
+    state_seq = get_rollout(train_state, config, save_dir)
+    viz = OvercookedVisualizer()
+    
+    if save_dir:
+        clean_filename = os.path.join(save_dir, clean_filename)
+    viz.animate(state_seq, agent_view_size=agent_view_size, filename=clean_filename)
 
 class CPCProjectionHead(nn.Module):
     """Projection head for CPC features"""
@@ -62,81 +77,36 @@ class CPCProjectionHead(nn.Module):
             bias_init=constant(0.0)
         )(x)
 
-# def compute_cpc_loss(current_features, future_features, temperature=0.1):
-#     """Compute CPC loss using current features to predict future observations.
-    
-#     Args:
-#         current_features: shape (batch_size, feature_dim)
-#         future_features: shape (batch_size, num_future_steps, feature_dim)
-#         temperature: scaling factor for similarity scores
-#     """
-#     # Normalize features
-#     current_features = current_features / (jnp.linalg.norm(current_features, axis=-1, keepdims=True) + 1e-8)
-#     future_features = future_features / (jnp.linalg.norm(future_features, axis=-1, keepdims=True) + 1e-8)
-    
-#     # Compute similarity scores - (batch_size, batch_size, num_future_steps)
-#     similarity = jnp.einsum('bd,bfd->bf', current_features, future_features) / temperature
-    
-#     # Create positive labels (diagonal indices)
-#     batch_size = current_features.shape[0]
-#     labels = jnp.arange(batch_size)
-    
-#     # Compute InfoNCE loss for each future step
-#     losses = []
-#     for t in range(future_features.shape[1]):
-#         t_similarity = similarity[:, t]  # (batch_size, batch_size)
-#         loss = -jnp.mean(
-#             jax.nn.log_softmax(t_similarity)[jnp.arange(batch_size)]
-#         )
-#         losses.append(loss)
-    
-#     return jnp.mean(jnp.array(losses))
-
-# v2
-# def compute_cpc_loss(context, future_z, num_negatives=32, temperature=0.07):
-#     """
-#     context: [batch_size, latent_dim]
-#     future_features: [batch_size, num_future_steps, latent_dim]
-#     """
-#     batch_size, num_future, dim = future_features.shape
-
-#     # Normalize representations
-#     context = context / jnp.linalg.norm(context, axis=-1, keepdims=True)
-#     future_features = future_features / jnp.linalg.norm(future_features, axis=-1, keepdims=True)
-
-#     losses = []
-#     for k in range(num_future):
-#         positive = jnp.sum(context * future_features[:, k, :], axis=-1, keepdims=True)  # (B, 1)
-#         negatives = jnp.einsum('id,jkd->ij', context, future_features[:, k, :])  # negatives from batch
-#         logits = jnp.concatenate([positive, negatives], axis=1) / temperature
-#         labels = jnp.zeros(batch_size, dtype=int)  # Positives are at position 0
-#         loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels).mean()
-#         losses.append(loss)
-
-#     cpc_loss = jnp.mean(jnp.stack(losses))
-
-#     return cpc_loss
-
-# v3: supposedly follow oord closely
 def compute_cpc_loss(context, future_z, config):
+    """Compute CPC loss for predicting future states.
+    
+    Args:
+        context: Current state features (batch_size, projection_dim)
+        future_z: Future state features (batch_size, num_future_steps, projection_dim)
+        config: Configuration dictionary containing CPC parameters
+    """
     temperature = config["CPC_CONFIG"]["temperature"]
-    num_future_steps = config["CPC_CONFIG"]["num_future_steps"]
-    projection_dim = config["CPC_CONFIG"]["projection_dim"]
-    gru_hidden_dim = config["CPC_CONFIG"]["gru_hidden_dim"]
-
-    batch_size, dim = future_z.shape
-    context = context / jnp.linalg.norm(context, axis=-1, keepdims=True)
-    future_z = future_z / jnp.linalg.norm(future_z, axis=-1, keepdims=True)
-
+    batch_size = context.shape[0]
+    
+    # Normalize features
+    context = context / (jnp.linalg.norm(context, axis=-1, keepdims=True) + 1e-8)
+    future_z = future_z / (jnp.linalg.norm(future_z, axis=-1, keepdims=True) + 1e-8)
+    
+    # Compute loss for each future step
     losses = []
-    for k in range(num_future_steps):
-        pred_future = self.Wk[k](context)
-        similarity = jnp.einsum('bd,nd->bn', pred_future, future_z[:, k])
-        similarity /= temperature
+    for k in range(future_z.shape[1]):  # iterate over future steps
+        # Get current future features
+        future_k = future_z[:, k]  # (batch_size, projection_dim)
+        
+        # Compute similarity scores
+        sim = jnp.einsum('bd,nd->bn', context, future_k)  # (batch_size, batch_size)
+        sim = sim / temperature
+        
+        # Use other samples in batch as negatives
         labels = jnp.arange(batch_size)
-        loss = optax.softmax_cross_entropy_with_integer_labels(similarity, labels)
-        losses.append(loss.mean())
-
+        loss = optax.softmax_cross_entropy_with_integer_labels(sim, labels)
+        losses.append(loss)
+    
     return jnp.mean(jnp.stack(losses))
 
 def get_rollout(train_state, agent_1_params, config, save_dir=None):
@@ -218,6 +188,45 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
     plt.close()
 
     return state_seq
+
+def visualize_representations(features, labels, step, save_dir=None):
+    """Visualize learned representations using UMAP."""
+    # Normalize features
+    scaler = StandardScaler()
+    features_normalized = scaler.fit_transform(features)
+    
+    # Apply UMAP
+    reducer = umap.UMAP(random_state=42)
+    embedding = reducer.fit_transform(features_normalized)
+    
+    # Create visualization
+    plt.figure(figsize=(10, 10))
+    scatter = plt.scatter(embedding[:, 0], embedding[:, 1], c=labels, cmap='viridis')
+    plt.colorbar(scatter)
+    plt.title(f'Learned Representations at Step {step}')
+    
+    # Save locally if directory provided
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, f'representations_{step}.png'))
+    
+    # Log to wandb
+    wandb.log({
+        'representations': wandb.Image(plt),
+        'step': step
+    })
+    plt.close()
+
+def log_training_metrics(metrics, step):
+    """Log training metrics to wandb."""
+    wandb.log({
+        'ppo_loss': metrics['ppo_loss'],
+        'value_loss': metrics['value_loss'],
+        'policy_loss': metrics['policy_loss'],
+        'entropy_loss': metrics['entropy_loss'],
+        'cpc_loss': metrics['cpc_loss'],
+        'episode_return': metrics['episode_return'],
+        'step': step
+    })
 
 def make_train(config):
     """Creates the main training function with the given config"""
@@ -416,48 +425,47 @@ def make_train(config):
                         network_params, projection_params = params
                         
                         # Get policy outputs and features
-                        pi, value, latent = network.apply(
-                            network_params,
+                        pi, value, latent, projected, _ = network.apply(
+                            params,
                             traj_batch.obs,
                             return_features=True
                         )
-                        log_prob = pi.log_prob(traj_batch.action)
-                        
-                        # Project features
-                        projected = projection_head.apply(
-                            projection_params,
-                            latent
-                        )
                         
                         # Standard PPO losses
-                        value_loss = 0.5 * jnp.square(value - targets).mean()
-                        
-                        # Actor loss with clipping
+                        log_prob = pi.log_prob(traj_batch.action)
                         ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
-                        actor_loss1 = ratio * gae
-                        actor_loss2 = jnp.clip(ratio, 1 - config["CLIP_EPS"], 1 + config["CLIP_EPS"]) * gae
-                        actor_loss = -jnp.minimum(actor_loss1, actor_loss2).mean()
                         
-                        # Entropy bonus
+                        # Policy loss
+                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                        policy_loss1 = ratio * gae
+                        policy_loss2 = jnp.clip(ratio, 1-config["CLIP_EPS"], 1+config["CLIP_EPS"]) * gae
+                        policy_loss = -jnp.minimum(policy_loss1, policy_loss2).mean()
+                        
+                        # Value loss
+                        value_loss = 0.5 * ((value - targets) ** 2).mean()
+                        
+                        # Entropy loss
                         entropy = pi.entropy().mean()
                         
                         # CPC loss
-                        cpc_loss = compute_cpc_loss(
-                            traj_batch.projected_features, 
-                            traj_batch.future_features, 
-                            temperature=config["CPC_TEMPERATURE"]
-                        )
+                        cpc_loss = compute_cpc_loss(projected, traj_batch.future_features, config)
                         
                         # Combine losses
                         total_loss = (
-                            actor_loss
-                            + config["VF_COEF"] * value_loss
+                            policy_loss 
+                            + config["VF_COEF"] * value_loss 
                             - config["ENT_COEF"] * entropy
-                            + config["CPC_COEF"] * cpc_loss
+                            + config["CPC_CONFIG"]["cpc_coef"] * cpc_loss
                         )
                         
-                        return total_loss, (value_loss, actor_loss, entropy, cpc_loss)
+                        return total_loss, {
+                            'policy_loss': policy_loss,
+                            'value_loss': value_loss,
+                            'entropy_loss': entropy,
+                            'cpc_loss': cpc_loss,
+                            'total_loss': total_loss,
+                            'latent_features': latent
+                        }
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
                     total_loss, grads = grad_fn(
@@ -498,11 +506,23 @@ def make_train(config):
             )
             train_state = update_state[0]
             
+            # Visualize representations periodically
+            if (update_step * config["NUM_STEPS"] * config["NUM_ENVS"]) % config["CPC_CONFIG"]["visualize_every"] == 0:
+                features = loss_info['latent_features']
+                labels = traj_batch.value  # Using value estimates as labels
+                visualize_representations(
+                    features.reshape(-1, features.shape[-1]),
+                    labels.reshape(-1),
+                    update_step * config["NUM_STEPS"] * config["NUM_ENVS"],
+                    save_dir
+                )
+            
             # Log metrics
             metric = info
             current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
             metric["shaped_reward"] = metric["shaped_reward"]["agent_0"]
             metric["shaped_reward_annealed"] = metric["shaped_reward"]*rew_shaping_anneal(current_timestep)
+            log_training_metrics(loss_info, update_step * config["NUM_STEPS"] * config["NUM_ENVS"])
 
             rng = update_state[-1]
 
@@ -532,13 +552,6 @@ def make_train(config):
 
 @hydra.main(version_base=None, config_path="config", config_name="cpc")
 def main(config):
-    # Add CPC-specific config
-    config.update({
-        "CPC_COEF": 0.1,  # Weight for CPC loss
-        "CPC_TEMPERATURE": 0.1,  # Temperature for similarity scaling
-        "CPC_FUTURE_STEPS": 8,  # Number of future steps to predict
-        "CPC_PROJECTION_DIM": 128,  # Dimension of projected features
-    })
     
     # Set up Python path
     project_root = Path(__file__).resolve().parents[3]

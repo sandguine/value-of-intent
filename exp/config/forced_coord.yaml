@@ -1,30 +1,56 @@
 # General Experiment Settings
 SEED: 30                              
-NUM_SEEDS: 128                         
+NUM_SEEDS: 64                         
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250228/forced_coord/ub_forced_coord_20250228_170600_30/
+
+# Architecture Settings
+ARCHITECTURE: "cnn"                   # "cnn" or "ff"
+
+# CNN-specific parameters
+CNN_CONFIG:
+  features: [32, 32, 32]             # Number of features per conv layer
+  kernel_sizes: [[5, 5], [3, 3], [3, 3]]  # Kernel sizes per layer
+  dense_features: 64                 # Features in final dense layer
+
+# FF-specific parameters
+FF_CONFIG:
+  hidden_layers: [64, 64]            # Size of hidden layers
+
+# RNN-specific parameters
+RNN_CONFIG:
+  hidden_sizes: [64, 64]  # Size of hidden layers in RNN
+  dense_features: 64      # Size of final dense layer
+
+# CPC-specific parameters
+CPC_CONFIG:
+  temperature: 0.1
+  num_negatives: 32
+  num_future_steps: 8
+  projection_dim: 128
+  gru_hidden_dim: 256
 
 # Environment Settings
 ENV_NAME: "overcooked"                
 ENV_KWARGS: 
   layout: "forced_coord"         
 
-ACTIVATION: "tanh"                    # tanh or relu
+ACTIVATION: "relu"                    # tanh or relu
 
 # PPO Hyperparameters
-LR: 0.0001                          
+LR: 8e-4                          
 ANNEAL_LR: true                       
-NUM_ENVS: 128                         # 128 for ub, maybe 64 for lb and op or 128 is fins too
-NUM_STEPS: 128                        
-TOTAL_TIMESTEPS: 4e8                  # 4e8 for all
+NUM_ENVS: 64                         # 128 for ub, maybe 64 for lb and op or 128 is fins too
+NUM_STEPS: 256                        
+TOTAL_TIMESTEPS: 5e7                  # 4e8 for all
 UPDATE_EPOCHS: 4                      
-NUM_MINIBATCHES: 4                    
-GAMMA: 0.98                           
-GAE_LAMBDA: 0.95                      
-CLIP_EPS: 0.2                         
-ENT_COEF: 0.05                        
+NUM_MINIBATCHES: 16                    
+GAMMA: 0.99                           
+GAE_LAMBDA: 0.98                      
+CLIP_EPS: 0.05                         
+ENT_COEF: 0.01                        
 VF_COEF: 0.5                          
 MAX_GRAD_NORM: 0.5                    
-REW_SHAPING_HORIZON: 2.5e7            
+REW_SHAPING_HORIZON: 2.5e6            
 
 # Transformer Settings
 SEQ_LEN: 5

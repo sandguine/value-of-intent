@@ -29,7 +29,7 @@ ENV_KWARGS:
 ACTIVATION: "relu"                    # tanh or relu, use relu in CNN
 
 # PPO Hyperparameters
-LR: 0.0005                          
+LR: 8e-4                          
 ANNEAL_LR: true                       
 NUM_ENVS: 64                         # 128 generally, try 64 for now
 NUM_STEPS: 256                        

@@ -448,7 +448,7 @@ def main(config):
     os.makedirs(save_dir, exist_ok=True)
 
     # Load pretrained parameters for agent_1
-    pretrained_params = load_training_results(config["LOAD_PATH"], load_type="params", config=config)
+    pretrained_params = load_training_results(config["LOAD_PATH"], load_type="complete", config=config)
     
     # Initialize and run training
     rng = jax.random.PRNGKey(config["SEED"])

@@ -68,7 +68,7 @@ def save_latent_embeddings(save_dir, latent_storage, action_storage):
 
     print(f"Latent embeddings saved to {save_dir}")
 
-def load_training_results(load_dir, load_type="params", config=None):
+def load_training_results(load_dir, load_type="complete", config=None):
     """Load training results from specified directory"""
     key = jax.random.PRNGKey(0)
     key, subkey = jax.random.split(key)

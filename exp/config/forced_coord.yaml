@@ -1,6 +1,6 @@
 # General Experiment Settings
 SEED: 30                              
-NUM_SEEDS: 64                         
+NUM_SEEDS: 64                        
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250228/forced_coord/ub_forced_coord_20250228_170600_30/
 
 # Architecture Settings

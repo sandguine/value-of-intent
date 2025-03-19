@@ -4,7 +4,7 @@ NUM_SEEDS: 64
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250314/cramped_room/ub_cnn_cramped_room_20250314_133108_30
 
 # Architecture Settings
-ARCHITECTURE: "cnn"                   # "cnn" or "ff"
+ARCHITECTURE: "rnn"                   # "cnn", "ff", "rnn"
 
 # CNN-specific parameters
 CNN_CONFIG:

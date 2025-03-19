@@ -4,7 +4,7 @@ NUM_SEEDS: 64                        # 128 for all, used 64 for now
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250228/coord_ring/ub_coord_ring_20250228_165554_30
 
 # Architecture Settings
-ARCHITECTURE: "cnn"                   # "cnn" or "ff"
+ARCHITECTURE: "rnn"                   # "cnn", "ff", "rnn"
 
 # CNN-specific parameters
 CNN_CONFIG:

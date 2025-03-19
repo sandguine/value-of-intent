@@ -4,7 +4,7 @@ NUM_SEEDS: 64
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250301/counter_circuit/ub_counter_circuit_20250301_104620_30
 
 # Architecture Settings
-ARCHITECTURE: "cnn"                   # "cnn", "ff", "rnn"
+ARCHITECTURE: "rnn"                   # "cnn", "ff", "rnn"
 
 # CNN-specific parameters
 CNN_CONFIG:

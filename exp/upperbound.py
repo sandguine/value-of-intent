@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import optax
 from typing import NamedTuple
 from flax.training.train_state import TrainState
+import numpy as np
 
 # Environment imports
 import jaxmarl
@@ -77,9 +78,7 @@ def get_rollout(train_state, config, save_dir=None):
         # Process observations based on architecture
         if config["ARCHITECTURE"].lower() == "cnn":
             obs_batch = jnp.stack([obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
-        elif config["ARCHITECTURE"].lower() == "rnn":
-            obs_batch = obs.reshape(1, -1)  
-        elif config["ARCHITECTURE"].lower() == "ff":
+        elif config["ARCHITECTURE"].lower() in ["rnn", "ff"]:
             obs = {k: v.flatten() for k, v in obs.items()}
             obs_batch = jnp.stack([obs[a] for a in env.agents])
 
@@ -150,13 +149,20 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         
         # Initialize with proper observation shape
-        if config["ARCHITECTURE"].lower() == "ff":
-            init_x = jnp.zeros((1, jnp.prod(env.observation_space().shape)))
-        elif config["ARCHITECTURE"].lower() == "rnn":
-            init_x = jnp.zeros((1, -1))
+        if config["ARCHITECTURE"].lower() == "rnn":
+            obs_dim = int(np.prod(env.observation_space().shape))
+            init_x = (
+                jnp.zeros((1, obs_dim)),          # obs
+                jnp.zeros((1,), dtype=bool)       # resets
+            )
+        elif config["ARCHITECTURE"].lower() == "ff":
+            obs_dim = int(np.prod(env.observation_space().shape))
+            init_x = jnp.zeros((1, obs_dim))
         elif config["ARCHITECTURE"].lower() == "cnn":
             init_x = jnp.zeros((1,) + env.observation_space().shape)
-            
+        else:
+            raise ValueError(f"Unsupported architecture: {config['ARCHITECTURE']}")
+
         network_params = network.init(_rng, init_x)
 
         # Setup optimizer with optional learning rate annealing
@@ -239,9 +245,7 @@ def make_train(config):
             # Process last observations based on architecture
             if config["ARCHITECTURE"].lower() == "cnn":
                 last_obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
-            elif config["ARCHITECTURE"].lower() == "rnn":
-                last_obs_batch = last_obs.reshape(1, -1)
-            elif config["ARCHITECTURE"].lower() == "ff":
+            elif config["ARCHITECTURE"].lower() in ["rnn", "ff"]:
                 last_obs_batch = batchify({k: v.flatten() for k, v in last_obs.items()}, env.agents, config["NUM_ACTORS"])
             
             _, last_val = network.apply(train_state.params, last_obs_batch)

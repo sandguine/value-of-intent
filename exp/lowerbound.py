@@ -34,7 +34,7 @@ import sys
 import matplotlib.pyplot as plt
 
 # Local imports
-from src.utils.data import get_network
+from src.utils.data import get_network, create_initial_obs, process_observations_asymmetric
 from src.utils.io import save_training_results, load_training_results
 from src.utils.viz import plot_learning_curves
 
@@ -85,23 +85,7 @@ def get_rollout(train_state, agent_1_params, config, save_dir=None):
         key, key_a0, key_a1, key_s = jax.random.split(key, 4)
 
         # Process observations based on architecture
-        if config["ARCHITECTURE"].lower() == "cnn":
-            obs_batch = {
-                'agent_0': obs['agent_0'][None, ...],  # Keep spatial dimensions for CNN
-                'agent_1': obs['agent_1'][None, ...]
-            }
-        elif config["ARCHITECTURE"].lower() == "rnn":
-            # For RNN, we need to maintain the sequence dimension
-            # Assuming obs shape is (seq_len, *feature_dims)
-            obs_batch = {
-                'agent_0': obs['agent_0'][None, :, :],  # Add batch dim but keep sequence dim
-                'agent_1': obs['agent_1'][None, :, :]
-            }
-        elif config["ARCHITECTURE"].lower() == "ff":
-            obs_batch = {
-                'agent_0': obs['agent_0'].flatten()[None, ...],
-                'agent_1': obs['agent_1'].flatten()[None, ...]
-            }
+        obs_batch = process_observations_asymmetric(obs, config)
 
         # Get actions from policies
         # Agent 1 (fixed partner) uses pretrained parameters
@@ -174,12 +158,7 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         
         # Initialize with proper observation shape based on architecture
-        if config["ARCHITECTURE"].lower() == "cnn":
-            init_x = jnp.zeros((1,) + env.observation_space().shape)
-        elif config["ARCHITECTURE"].lower() == "rnn":
-            init_x = jnp.zeros((1, -1))
-        elif config["ARCHITECTURE"].lower() == "ff":
-            init_x = jnp.zeros((1, np.prod(env.observation_space().shape)))
+        init_x = create_initial_obs(env.observation_space().shape, config)
             
         network_params = network.init(_rng, init_x)
 
@@ -214,23 +193,7 @@ def make_train(config):
                 rng, rng_action_1, rng_action_0, rng_step = jax.random.split(rng, 4)
 
                 # Process observations based on architecture
-                if config["ARCHITECTURE"].lower() == "cnn":
-                    obs_batch = {
-                        'agent_0': last_obs['agent_0'],  # Keep spatial dimensions for CNN
-                        'agent_1': last_obs['agent_1']
-                    }
-                elif config["ARCHITECTURE"].lower() == "rnn":
-                    # For RNN, we need to maintain the sequence dimension
-                    # Assuming obs shape is (seq_len, *feature_dims)
-                    obs_batch = {
-                        'agent_0': last_obs['agent_0'][None, :, :],  # Add batch dim but keep sequence dim
-                        'agent_1': last_obs['agent_1'][None, :, :]
-                    }
-                else:  # feedforward case
-                    obs_batch = {
-                        'agent_0': last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1),
-                        'agent_1': last_obs['agent_1'].reshape(last_obs['agent_1'].shape[0], -1)
-                    }
+                obs_batch = process_observations_asymmetric(last_obs, config)
 
                 # Agent 1 (fixed partner) uses pretrained parameters
                 agent_1_action = jax.vmap(

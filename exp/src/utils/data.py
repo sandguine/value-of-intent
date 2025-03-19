@@ -102,3 +102,31 @@ def create_initial_obs(obs_shape, config):
         return jnp.zeros((1,) + obs_shape)
     else:
         raise ValueError(f"Unsupported architecture: {config['ARCHITECTURE']}")
+
+def process_observations_asymmetric(obs, config):
+    """Process observations for lower bound and CPC implementations.
+    
+    Args:
+        obs: Raw observations from environment
+        config: Configuration dictionary containing architecture info
+        
+    Returns:
+        Dictionary containing processed observations for agent_0 and agent_1
+    """
+    if config["ARCHITECTURE"].lower() == "cnn":
+        return {
+            'agent_0': obs['agent_0'][None, ...],  # Keep spatial dimensions for CNN
+            'agent_1': obs['agent_1'][None, ...]
+        }
+    elif config["ARCHITECTURE"].lower() == "rnn":
+        # For RNN, we need to maintain the sequence dimension
+        # Assuming obs shape is (seq_len, *feature_dims)
+        return {
+            'agent_0': obs['agent_0'][None, :, :],  # Add batch dim but keep sequence dim
+            'agent_1': obs['agent_1'][None, :, :]
+        }
+    else:  # feedforward case
+        return {
+            'agent_0': obs['agent_0'].flatten()[None, ...],
+            'agent_1': obs['agent_1'].flatten()[None, ...]
+        }

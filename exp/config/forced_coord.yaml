@@ -4,7 +4,7 @@ NUM_SEEDS: 64
 LOAD_PATH: /nas/ucb/sandytanwisuth/ser/value-of-intent/saved_models/20250228/forced_coord/ub_forced_coord_20250228_170600_30/
 
 # Architecture Settings
-ARCHITECTURE: "rnn"                   # "cnn", "ff", "rnn"
+ARCHITECTURE: "cnn"                   # "cnn", "ff", "rnn"
 
 # CNN-specific parameters
 CNN_CONFIG:

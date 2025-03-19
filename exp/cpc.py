@@ -33,7 +33,7 @@ import sys
 import matplotlib.pyplot as plt
 
 # Local imports
-from src.utils.data import get_network
+from src.utils.data import get_network, batchify, unbatchify, process_observations, create_initial_obs
 from src.utils.io import save_training_results, load_training_results
 from src.utils.viz import plot_learning_curves
 
@@ -262,12 +262,8 @@ def make_train(config):
         network, projection_head = get_network(config, env.action_space().n)
         rng, _rng = jax.random.split(rng)
         
-        # Initialize with proper observation shape based on architecture
-        if config["ARCHITECTURE"].lower() == "cnn":
-            init_x = jnp.zeros((1,) + env.observation_space().shape)
-        else:
-            init_x = jnp.zeros((1, np.prod(env.observation_space().shape)))
-            
+        # Initialize with proper observation shape
+        init_x = create_initial_obs(env.observation_space().shape, config)
         network_params = network.init(_rng, init_x)
 
         # Setup optimizer with optional learning rate annealing
@@ -300,24 +296,14 @@ def make_train(config):
                 train_state, env_state, last_obs, update_step, rng = runner_state
                 rng, rng_action_1, rng_action_0, rng_step = jax.random.split(rng, 4)
 
-                # Process observations and extract features
-                if config["ARCHITECTURE"].lower() == "cnn":
-                    obs_batch = {
-                        'agent_0': last_obs['agent_0'],
-                        'agent_1': last_obs['agent_1']
-                    }
-                elif config["ARCHITECTURE"].lower() == "rnn":
-                    obs_batch = {
-                        'agent_0': last_obs['agent_0'],
-                        'agent_1': last_obs['agent_1']
-                    }
-                elif config["ARCHITECTURE"].lower() == "ff":
-                    obs_batch = {
-                        'agent_0': last_obs['agent_0'].flatten(),
-                        'agent_1': last_obs['agent_1'].flatten()
-                    }
-                else:
-                    raise ValueError(f"Invalid architecture: {config['ARCHITECTURE']}")
+                # Process observations based on architecture
+                obs_batch = process_observations(
+                    last_obs, 
+                    env.agents, 
+                    config["NUM_ACTORS"], 
+                    env.observation_space().shape,
+                    config
+                )
 
                 # Get features and policy outputs for agent_0
                 pi_0, value_0, latent_features = network.apply(
@@ -386,15 +372,16 @@ def make_train(config):
             train_state, env_state, last_obs, update_step, rng = runner_state
 
             # Process last observations for value calculation
-            if config["ARCHITECTURE"].lower() == "cnn":
-                last_obs_agent0 = last_obs['agent_0']
-            elif config["ARCHITECTURE"].lower() == "rnn":
-                last_obs_agent0 = last_obs['agent_0']
-            else:
-                last_obs_agent0 = last_obs['agent_0'].reshape(last_obs['agent_0'].shape[0], -1)
+            last_obs_batch = process_observations(
+                last_obs, 
+                env.agents, 
+                config["NUM_ACTORS"], 
+                env.observation_space().shape,
+                config
+            )
 
             # Get last value for advantage calculation
-            _, last_val = network.apply(train_state.params.network, last_obs_agent0)
+            _, last_val = network.apply(train_state.params.network, last_obs_batch)
 
             def _calculate_gae(traj_batch, last_val):
                 def _get_advantages(gae_and_next_value, transition):

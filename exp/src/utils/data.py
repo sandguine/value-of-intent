@@ -3,6 +3,7 @@ import jax
 import jaxmarl
 import os
 import matplotlib.pyplot as plt
+import numpy as np
 from src.models.actor_critic import ActorCritic
 from src.models.backbones.cnn import CNN
 from src.models.backbones.rnn import RNN
@@ -57,3 +58,47 @@ def unbatchify(x: jnp.ndarray, agent_list, num_envs, num_actors):
     """Convert batched array back to dict of agent observations"""
     x = x.reshape((num_actors, num_envs, -1))
     return {a: x[i] for i, a in enumerate(agent_list)}
+
+def process_observations(obs, agent_list, num_actors, obs_shape, config):
+    """Process observations based on architecture type.
+    
+    Args:
+        obs: Raw observations from environment
+        agent_list: List of agent names
+        num_actors: Number of actors (agents * num_envs)
+        obs_shape: Shape of observation space
+        config: Configuration dictionary containing architecture info
+        
+    Returns:
+        Processed observations in the format expected by the network
+    """
+    if config["ARCHITECTURE"].lower() == "cnn":
+        return jnp.stack([obs[a] for a in agent_list]).reshape(-1, *obs_shape)
+    elif config["ARCHITECTURE"].lower() in ["rnn", "ff"]:
+        return batchify({k: v.flatten() for k, v in obs.items()}, agent_list, num_actors)
+    else:
+        raise ValueError(f"Unsupported architecture: {config['ARCHITECTURE']}")
+
+def create_initial_obs(obs_shape, config):
+    """Create initial observation tensor based on architecture type.
+    
+    Args:
+        obs_shape: Shape of observation space
+        config: Configuration dictionary containing architecture info
+        
+    Returns:
+        Initial observation tensor for network initialization
+    """
+    if config["ARCHITECTURE"].lower() == "rnn":
+        obs_dim = int(np.prod(obs_shape))
+        return (
+            jnp.zeros((1, obs_dim)),          # obs
+            jnp.zeros((1,), dtype=bool)       # resets
+        )
+    elif config["ARCHITECTURE"].lower() == "ff":
+        obs_dim = int(np.prod(obs_shape))
+        return jnp.zeros((1, obs_dim))
+    elif config["ARCHITECTURE"].lower() == "cnn":
+        return jnp.zeros((1,) + obs_shape)
+    else:
+        raise ValueError(f"Unsupported architecture: {config['ARCHITECTURE']}")

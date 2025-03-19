@@ -32,7 +32,7 @@ import sys
 import matplotlib.pyplot as plt
 
 # Local imports
-from src.utils.data import get_network, batchify, unbatchify
+from src.utils.data import get_network, batchify, unbatchify, process_observations, create_initial_obs
 from src.utils.io import save_training_results
 from src.utils.viz import plot_learning_curves
 
@@ -149,20 +149,7 @@ def make_train(config):
         rng, _rng = jax.random.split(rng)
         
         # Initialize with proper observation shape
-        if config["ARCHITECTURE"].lower() == "rnn":
-            obs_dim = int(np.prod(env.observation_space().shape))
-            init_x = (
-                jnp.zeros((1, obs_dim)),          # obs
-                jnp.zeros((1,), dtype=bool)       # resets
-            )
-        elif config["ARCHITECTURE"].lower() == "ff":
-            obs_dim = int(np.prod(env.observation_space().shape))
-            init_x = jnp.zeros((1, obs_dim))
-        elif config["ARCHITECTURE"].lower() == "cnn":
-            init_x = jnp.zeros((1,) + env.observation_space().shape)
-        else:
-            raise ValueError(f"Unsupported architecture: {config['ARCHITECTURE']}")
-
+        init_x = create_initial_obs(env.observation_space().shape, config)
         network_params = network.init(_rng, init_x)
 
         # Setup optimizer with optional learning rate annealing
@@ -198,10 +185,13 @@ def make_train(config):
                 rng, _rng = jax.random.split(rng)
                 
                 # Process observations based on architecture
-                if config["ARCHITECTURE"].lower() == "cnn":
-                    obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
-                else:
-                    obs_batch = batchify({k: v.flatten() for k, v in last_obs.items()}, env.agents, config["NUM_ACTORS"])
+                obs_batch = process_observations(
+                    last_obs, 
+                    env.agents, 
+                    config["NUM_ACTORS"], 
+                    env.observation_space().shape,
+                    config
+                )
                 
                 pi, value = network.apply(train_state.params, obs_batch)
                 action = pi.sample(seed=_rng)
@@ -243,10 +233,13 @@ def make_train(config):
             train_state, env_state, last_obs, update_step, rng = runner_state
             
             # Process last observations based on architecture
-            if config["ARCHITECTURE"].lower() == "cnn":
-                last_obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
-            elif config["ARCHITECTURE"].lower() in ["rnn", "ff"]:
-                last_obs_batch = batchify({k: v.flatten() for k, v in last_obs.items()}, env.agents, config["NUM_ACTORS"])
+            last_obs_batch = process_observations(
+                last_obs, 
+                env.agents, 
+                config["NUM_ACTORS"], 
+                env.observation_space().shape,
+                config
+            )
             
             _, last_val = network.apply(train_state.params, last_obs_batch)
 

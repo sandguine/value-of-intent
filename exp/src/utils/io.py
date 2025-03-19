@@ -5,7 +5,7 @@ import pickle
 import os
 
 def save_training_results(save_dir, out, config):
-    """Save training results and metrics"""
+    """Save training results to specified directory"""
     os.makedirs(save_dir, exist_ok=True)
 
     def is_pickleable(obj):
@@ -20,32 +20,84 @@ def save_training_results(save_dir, out, config):
             if isinstance(x, (jax.Array, np.ndarray)):
                 x = np.array(x)
             return x if is_pickleable(x) else None
+        
         return jax.tree_util.tree_map(convert_and_filter, tree)
     
-    # Convert outputs to numpy and save
+    # Convert outputs to numpy format
     numpy_out = jax.tree_util.tree_map(
         lambda x: np.array(x) if isinstance(x, (jax.Array, np.ndarray)) else x,
         jax.device_get(out)
     )
     
     # Filter and save pickleable objects
-    pickle_safe_out = {k: v for k, v in numpy_out.items() if is_pickleable(v)}
-    
+    pickle_safe_out = {}
+    for key, value in numpy_out.items():
+        try:
+            pickle.dumps(value)
+            pickle_safe_out[key] = value
+        except Exception as e:
+            print(f"Warning: Skipping unpickleable key '{key}' due to: {str(e)}")
+
     # Save complete output
-    with open(os.path.join(save_dir, "complete_out.pkl"), 'wb') as f:
+    pickle_out_path = os.path.join(save_dir, f"complete_out.pkl")
+    with open(pickle_out_path, 'wb') as f:
         pickle.dump(pickle_safe_out, f)
-    np.savez(os.path.join(save_dir, "complete_out.npz"), **pickle_safe_out)
+
+    npz_out_path = os.path.join(save_dir, f"complete_out.npz")
+    np.savez(npz_out_path, **pickle_safe_out)
+
+    # Process seed-specific parameters
+    all_seeds_params = {}
+    for seed_idx in range(config["NUM_SEEDS"]):
+        try:
+            if "runner_state" not in out or not out["runner_state"]:
+                print(f"Warning: No runner_state found for seed {seed_idx}")
+                continue
+                
+            train_state = jax.tree_util.tree_map(
+                lambda x: x[seed_idx] if x is not None else None,
+                out["runner_state"][0]
+            )
+            
+            processed_state = {}
+            
+            if hasattr(train_state, 'params'):
+                processed_params = process_tree(train_state.params)
+                if processed_params is not None:
+                    processed_state['params'] = processed_params['params']
+            
+            if hasattr(train_state, 'step'):
+                try:
+                    processed_state['step'] = np.array(train_state.step)
+                except Exception as e:
+                    print(f"Warning: Could not process step for seed {seed_idx}: {str(e)}")
+            
+            if "metrics" in out:
+                processed_metrics = process_tree(
+                    jax.tree_util.tree_map(
+                        lambda x: x[seed_idx] if isinstance(x, (jax.Array, np.ndarray)) else x,
+                        out["metrics"]
+                    )
+                )
+                if processed_metrics:
+                    processed_state['metrics'] = processed_metrics
+            
+            if processed_state:
+                all_seeds_params[f"seed_{seed_idx}"] = processed_state
+            
+        except Exception as e:
+            print(f"Warning: Could not process seed {seed_idx} due to: {str(e)}")
+            continue
     
-    # Save metrics
-    if "metrics" in out:
-        np.savez(
-            os.path.join(save_dir, "metrics.npz"),
-            **{k: np.array(v) for k, v in out["metrics"].items()}
-        )
-    
-    # Save config
-    with open(os.path.join(save_dir, "config.pkl"), 'wb') as f:
-        pickle.dump(config, f)
+    if all_seeds_params:
+        pickle_seeds_path = os.path.join(save_dir, f"all_seeds_params.pkl")
+        with open(pickle_seeds_path, 'wb') as f:
+            pickle.dump(all_seeds_params, f)
+        
+        npz_seeds_path = os.path.join(save_dir, f"all_seeds_params.npz")
+        np.savez(npz_seeds_path, **all_seeds_params)
+    else:
+        print("Warning: No seed-specific parameters were successfully processed")
 
 def save_latent_embeddings(save_dir, latent_storage, action_storage):
     """Save latent embeddings and associated actions."""

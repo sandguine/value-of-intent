@@ -21,13 +21,15 @@ RNN_CONFIG:
   hidden_sizes: [64, 64]  # Size of hidden layers in RNN
   dense_features: 64      # Size of final dense layer
 
-# CPC-specific parameters
+USE_CPC: true
+
 CPC_CONFIG:
   temperature: 0.1
   num_negatives: 32
   num_future_steps: 8
   projection_dim: 128
   gru_hidden_dim: 256
+  encoder_type: "cnn"  # could be "ff", "rnn"
   
 # Environment Settings
 ENV_NAME: "overcooked"                

@@ -5,6 +5,11 @@ import pickle
 import os
 import flax
 
+from .models import CPCModule
+from .models.backbones.cnn import CNN
+from .models.backbones.ff import FeedForward
+from .models.backbones.rnn import RNN
+
 def save_training_results(save_dir, out, config):
     """Save training results to specified directory"""
     os.makedirs(save_dir, exist_ok=True)
@@ -165,3 +170,30 @@ def load_training_results(load_dir, load_type="complete", config=None):
                 )
     
     raise FileNotFoundError(f"No saved {load_type} found in {load_dir}")
+
+def load_cpc_encoder(config):
+    encoder_type = config['CPC_CONFIG']['encoder_type']
+    
+    if encoder_type == 'cnn':
+        from cnn import CNNEncoder
+        def encoder_fn(obs):
+            model = CNNEncoder(config['CNN_CONFIG'])
+            return model(obs)
+        return encoder_fn
+    
+    elif encoder_type == 'ff':
+        from ff import FFEncoder
+        def encoder_fn(obs):
+            model = FFEncoder(config['FF_CONFIG'])
+            return model(obs)
+        return encoder_fn
+
+    elif encoder_type == 'rnn':
+        from rnn import RNNEncoder
+        def encoder_fn(obs):
+            model = RNNEncoder(config['RNN_CONFIG'])
+            return model(obs)
+        return encoder_fn
+    
+    else:
+        raise ValueError(f"Unknown CPC encoder type: {encoder_type}")

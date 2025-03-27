@@ -281,7 +281,7 @@ def make_train(config):
                 rng, rng_action_1, rng_action_0, rng_step = jax.random.split(rng, 4)
 
                 # Process observations based on architecture
-                obs_batch = process_observations_lowerbound(last_obs, config)
+                obs_batch = process_observations_asymmetric(last_obs, config)
 
                 # Get features and policy outputs for agent_0
                 pi_0, value_0, latent_features = network.apply(
@@ -350,7 +350,7 @@ def make_train(config):
             train_state, env_state, last_obs, update_step, rng = runner_state
 
             # Process last observations for value calculation
-            last_obs_batch = process_observations_lowerbound(last_obs, config)
+            last_obs_batch = process_observations_asymmetric(last_obs, config)
 
             # Get last value for advantage calculation
             _, last_val = network.apply(train_state.params.network, last_obs_batch)

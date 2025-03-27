@@ -23,13 +23,13 @@ RNN_CONFIG:
 
 USE_CPC: true
 
+CPC_ENCODER: "cnn"  # could be "ff", "rnn"
 CPC_CONFIG:
-  temperature: 0.1
-  num_negatives: 32
-  num_future_steps: 8
   projection_dim: 128
   gru_hidden_dim: 256
-  encoder_type: "cnn"  # could be "ff", "rnn"
+  num_future_steps: 8
+  temperature: 0.1
+
   
 # Environment Settings
 ENV_NAME: "overcooked"                

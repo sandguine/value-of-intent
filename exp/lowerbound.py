@@ -197,9 +197,9 @@ def make_train(config):
 
                 # Agent 1 (fixed partner) uses pretrained parameters
                 agent_1_action = jax.vmap(
-                    lambda params, obs, rng: network.apply(params, obs[None, ...])[0].sample(seed=rng),
-                    in_axes=(0, 0, 0)
-                )(pretrained_params, obs_batch['agent_1'], jax.random.split(rng_action_1, obs_batch['agent_1'].shape[0]))
+                    lambda obs, rng: network.apply(pretrained_params, obs[None])[0].sample(seed=rng),
+                    in_axes=(0, 0)
+                )(obs_batch['agent_1'], rng_action_1)
 
                 # Agent 0 (learning agent) uses current training parameters
                 pi_0, value_0 = network.apply(train_state.params, obs_batch['agent_0'])
@@ -411,7 +411,10 @@ def main(config):
     os.makedirs(save_dir, exist_ok=True)
 
     # Load pretrained parameters for agent_1
-    pretrained_params = load_training_results(config["LOAD_PATH"], load_type="complete", config=config)
+    pretrained_params = load_training_results(config["LOAD_PATH"], load_type="params", config=config)
+    print("Shape of pretrained_params tree:")
+    print(jax.tree_util.tree_map(lambda x: x.shape, pretrained_params))
+    print("NUM_ENVS:", config["NUM_ENVS"])
     
     # Initialize and run training
     rng = jax.random.PRNGKey(config["SEED"])

@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pickle
 import os
+import flax
 
 def save_training_results(save_dir, out, config):
     """Save training results to specified directory"""

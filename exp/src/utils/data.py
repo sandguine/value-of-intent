@@ -115,8 +115,8 @@ def process_observations_asymmetric(obs, config):
     """
     if config["ARCHITECTURE"].lower() == "cnn":
         return {
-            'agent_0': obs['agent_0'][None, ...],  # Keep spatial dimensions for CNN
-            'agent_1': obs['agent_1'][None, ...]
+            'agent_0': obs['agent_0'],  # Keep spatial dimensions for CNN
+            'agent_1': obs['agent_1']
         }
     elif config["ARCHITECTURE"].lower() == "rnn":
         # For RNN, we need to maintain the sequence dimension

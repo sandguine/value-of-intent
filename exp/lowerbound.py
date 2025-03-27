@@ -195,20 +195,31 @@ def make_train(config):
                 # Process observations based on architecture
                 obs_batch = process_observations_asymmetric(last_obs, config)
 
-                # Agent 1 (fixed partner) uses pretrained parameters
-                agent_1_action = jax.vmap(
-                    lambda obs, rng: network.apply(pretrained_params, obs[None])[0].sample(seed=rng),
-                    in_axes=(0, 0)
-                )(obs_batch['agent_1'], rng_action_1)
+                # Split RNGs for fixed agent (agent_1)
+                rngs_1 = jax.random.split(rng_action_1, config["NUM_ENVS"])
 
-                # Agent 0 (learning agent) uses current training parameters
+                # Sample actions for agent_1 using pretrained (fixed) policies
+                agent_1_action = jax.vmap(
+                    lambda params, obs, rng: network.apply({'params': params}, obs[None])[0].sample(seed=rng),
+                    in_axes=(0, 0, 0)
+                )(
+                    pretrained_params["params"],  # shape: (NUM_ENVS, ...)
+                    obs_batch['agent_1'],         # shape: (NUM_ENVS, ...)
+                    rngs_1                        # shape: (NUM_ENVS,)
+                )
+
+                # Sample actions for agent_0 using current trainable policy
                 pi_0, value_0 = network.apply(train_state.params, obs_batch['agent_0'])
                 action_0 = pi_0.sample(seed=rng_action_0)
                 log_prob_0 = pi_0.log_prob(action_0)
 
-                actions = {"agent_0": action_0, "agent_1": agent_1_action}
+                # Unbatch into list of action dicts for each environment
+                actions = [
+                    {"agent_0": a0, "agent_1": a1}
+                    for a0, a1 in zip(action_0, agent_1_action)
+                ]
 
-                # Step environment forward
+                # Step environment forward across all environments
                 next_obs, next_env_state, reward, done, info = jax.vmap(env.step, in_axes=(0, 0, 0))(
                     jax.random.split(rng_step, config["NUM_ENVS"]),
                     env_state,
